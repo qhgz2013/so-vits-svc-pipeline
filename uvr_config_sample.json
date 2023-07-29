@@ -1,0 +1,13 @@
+{
+    "process_method": "Ensemble Mode",
+    "model_name": [
+        "VR Arc: 9_HP2-UVR",
+        "Demucs: v4 | htdemucs_ft"
+    ],
+    "gpu_conversion": true,
+    "sample_mode": false,
+    "stem_pair": "Vocals/Instrumental",
+    "ensemble_algorithm": "Max Spec/Min Spec",
+    "primary_stem_only": false,
+    "secondary_stem_only": false
+}
