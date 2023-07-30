@@ -113,7 +113,7 @@ class MDXNetArchRequest(UVREnvRequest):
         self.batch_size = batch_size
         self.volume_compensation = volume_compensation
         self.advanced_option = advanced_option
-        self.secondary_model = secondary_model_option
+        self.secondary_model_option = secondary_model_option
 
 
 class DemucsArchAdvancedOption(UVRRequestObject):

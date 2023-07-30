@@ -1,0 +1,32 @@
+[
+    {
+        "process_method": "MDX-Net",
+        "model_name": "Kim Vocal 1",
+        "gpu_conversion": true,
+        "vocal_only": true,
+        "inst_only": false,
+        "sample_mode": false,
+        "advanced_option": {
+            "denoise_output": true
+        },
+        "secondary_model_option": {
+            "activate": true,
+            "voc_inst_model": "VR Arc: 5_HP-Karaoke-UVR",
+            "voc_inst_model_scale": 0.3
+        }
+    },
+    {
+        "process_method": "MDX-Net",
+        "model_name": "UVR-MDX-NET Inst 3",
+        "gpu_conversion": true,
+        "vocal_only": false,
+        "inst_only": true,
+        "sample_mode": false,
+        "advanced_option": {
+            "denoise_output": true
+        },
+        "secondary_model_option": {
+            "activate": false
+        }
+    }
+]

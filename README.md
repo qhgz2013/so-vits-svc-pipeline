@@ -19,7 +19,7 @@ conda activate uvr
 pip install -r requirements.txt
 ```
 
-**Note**: Package `Dora` (which relies on an outdated version of `scikit-learn`) and `pip` (which is already installed) is not necessary for running UVR tasks. If error encounters during installing requirements packages, try remove the above two lines from requirements.txt.
+**Note**: Package `Dora` (which relies on an outdated version of `scikit-learn`) and `pip` (which is already installed) are not necessary for running UVR tasks. If error encounters during installing required packages, try remove the above two lines from requirements.txt.
 
 After installation, run UVR GUI and download required models (optional) via: `python UVR.py`
 
@@ -91,7 +91,7 @@ This section will be done in future.
 
 - [x] Add `--separate_process`.
 - [x] Refactor UVR-http-service to provide per-task UVR environment setup.
-- [ ] Use different configs to obtain high-quality vocal and instrumental stems separately.
+- [x] Use different configs to obtain high-quality vocal and instrumental stems separately. (reuse `-uc` by specifying vocal only and inst only environments, refers to `uvr_config_sep_sample.json` for detail)
 - [ ] Customize volume mix factor for multiple speakers (by argument `-s spk1*<factor1>+spk2*<factor2>`).
 
 [UltimateVocalRemoverGUI]: https://github.com/Anjok07/ultimatevocalremovergui#manual-windows-installation

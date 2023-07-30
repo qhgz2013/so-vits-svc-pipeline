@@ -13,6 +13,7 @@ from time import sleep
 import json
 from typing import *
 import uvr_api_client as api
+import requests
 
 # cspell:ignore vits,adelay,flac,amerge
 
@@ -122,6 +123,39 @@ def check_diff_file(new_files: List[str], args) -> str:
     return new_sounds[0]
 
 
+def execute_uvr_task(args) -> List[api.TaskContext]:
+    s = requests.session()
+    req = {'input_file': args.input, 'output_file': args.output}
+    if args.uvr_config is not None and os.path.isfile(args.uvr_config):
+        with open(args.uvr_config, 'r', encoding='utf8') as f:
+            envs = json.load(f)
+    if not isinstance(envs, list):
+        envs = [envs]
+    ret_ctx = []
+    for env in envs:
+        req['env'] = env
+        print(f'Executing UVR task: {req}')
+        resp = s.get(f'http://{args.uvr_host}:{args.uvr_port}/create', params=json.dumps(req, separators=(',', ':')))
+        if resp.ok:
+            run_ctx = api.deserialize_response_json(resp.json())
+            task_id = run_ctx.task_id
+            log_idx = 0
+            while run_ctx.task_state > 0:  # pending and running
+                sleep(1)
+                resp = s.get(f'http://{args.uvr_host}:{args.uvr_port}/query',
+                                params=json.dumps({'task_id': task_id}, separators=(',', ':')))
+                if not resp.ok:
+                    break
+                run_ctx = api.deserialize_response_json(resp.json())
+                if len(run_ctx.task_log) > log_idx:
+                    # show UVR task log
+                    print(run_ctx.task_log[log_idx:], end='')
+                    log_idx = len(run_ctx.task_log)
+            print('')
+            ret_ctx.append(run_ctx)
+    return ret_ctx
+
+
 def main():
     parser = argparse.ArgumentParser()
     # if uvr-http-service is set and available, --input refers to the source audio file, UVR will be run automatically
@@ -201,34 +235,21 @@ def main():
     vocal_file, inst_file = None, None
     if args.uvr_port > 0 and len(args.uvr_host) > 0 and os.path.isfile(args.input):
         uvr_exec = True
-        import requests
-        s = requests.session()
-        req = {'input_file': args.input, 'output_file': args.output}
-        if args.uvr_config is not None and os.path.isfile(args.uvr_config):
-            with open(args.uvr_config, 'r', encoding='utf8') as f:
-                req['env'] = json.load(f)
-        print(f'Executing UVR task: {req}')
-        resp = s.get(f'http://{args.uvr_host}:{args.uvr_port}/create', params=json.dumps(req, separators=(',', ':')))
-        if resp.ok:
-            run_ctx = api.deserialize_response_json(resp.json())
-            task_id = run_ctx.task_id
-            log_idx = 0
-            while run_ctx.task_state > 0:  # pending and running
-                sleep(1)
-                resp = s.get(f'http://{args.uvr_host}:{args.uvr_port}/query',
-                             params=json.dumps({'task_id': task_id}, separators=(',', ':')))
-                if not resp.ok:
-                    break
-                run_ctx = api.deserialize_response_json(resp.json())
-                if len(run_ctx.task_log) > log_idx:
-                    # show UVR task log
-                    print(run_ctx.task_log[log_idx:], end='')
-                    log_idx = len(run_ctx.task_log)
-            if run_ctx.task_state == api.UVRCallState.SUCCESS:
-                manual_input_path_mode = False
-                vocal_file = run_ctx.final_output_file['Vocals']
-                inst_file = run_ctx.final_output_file['Instrumental']
-        print('UVR task executed successfully')
+        tasks = execute_uvr_task(args)
+        final_output_files = {}
+        for i, task in enumerate(tasks):
+            if task.task_state == api.UVRCallState.SUCCESS:
+                print(f'UVR task [{i}] executed successfully')
+                final_output_files.update(task.final_output_file.items())
+            else:
+                print(f'UVR task [{i}] failed')
+                raise RuntimeError(f'UVR task [{i}] failed')
+        if 'Vocals' in final_output_files and 'Instrumental' in final_output_files:
+            manual_input_path_mode = False
+            vocal_file = final_output_files['Vocals']
+            inst_file = final_output_files['Instrumental']
+        else:
+            raise RuntimeError('Missing output Vocals and/or Instrumental file(s)')
     # non-UVR mode
     if manual_input_path_mode:
         if uvr_exec:
