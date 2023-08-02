@@ -201,38 +201,45 @@ def serialize_request_json(uvr_request: UVRRequest) -> str:
     return json.dumps(root, separators=(',', ':'))
 
 
-def deserialize_request_json(request_json: Union[str, Dict[str, Any]]) -> UVRRequest:
+def _json_to_dict(request_json: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(request_json, str):
-        request_json = json.loads(request_json)
-    else:
-        request_json = request_json.copy()
+        return json.loads(request_json)
+    return request_json.copy()
+
+
+def deserialize_request_json(request_json: Union[str, Dict[str, Any]]) -> UVRRequest:
+    request_json = _json_to_dict(request_json)
     env = request_json.pop('env', None)
     if env is not None:
-        req_type = EProcessMethod(env.pop('process_method'))
-        if req_type == EProcessMethod.VR_MODE:
-            advanced_opt_cls = VRArchAdvancedOption
-            base_cls = VRArchRequest
-        elif req_type == EProcessMethod.MDX_MODE:
-            advanced_opt_cls = MDXNetArchAdvancedOption
-            base_cls = MDXNetArchRequest
-        elif req_type == EProcessMethod.DEMUCS_MODE:
-            advanced_opt_cls = DemucsArchAdvancedOption
-            base_cls = DemucsArchRequest
-        elif req_type == EProcessMethod.ENSEMBLE_MODE:
-            advanced_opt_cls = EnsembleModeAdvancedOption
-            base_cls = EnsembleModeRequest
-        else:
-            raise ValueError('Invalid process_method')
-        advanced_opt_args = env.pop('advanced_option', None)
-        secondary_model_args = env.pop('secondary_model_option', None)
-        if advanced_opt_args is not None:
-            advanced_opt = advanced_opt_cls(**advanced_opt_args)
-            env['advanced_option'] = advanced_opt
-        if secondary_model_args is not None:
-            env['secondary_model_option'] = SecondaryModelOption(**secondary_model_args)
-        env = base_cls(**env)
-        request_json['env'] = env
+        request_json['env'] = deserialize_env_request_json(env)
     return UVRRequest(**request_json)
+
+
+def deserialize_env_request_json(request_json: Union[str, Dict[str, Any]]) -> UVREnvRequest:
+    env = _json_to_dict(request_json)
+    req_type = EProcessMethod(env.pop('process_method'))
+    if req_type == EProcessMethod.VR_MODE:
+        advanced_opt_cls = VRArchAdvancedOption
+        base_cls = VRArchRequest
+    elif req_type == EProcessMethod.MDX_MODE:
+        advanced_opt_cls = MDXNetArchAdvancedOption
+        base_cls = MDXNetArchRequest
+    elif req_type == EProcessMethod.DEMUCS_MODE:
+        advanced_opt_cls = DemucsArchAdvancedOption
+        base_cls = DemucsArchRequest
+    elif req_type == EProcessMethod.ENSEMBLE_MODE:
+        advanced_opt_cls = EnsembleModeAdvancedOption
+        base_cls = EnsembleModeRequest
+    else:
+        raise ValueError('Invalid process_method')
+    advanced_opt_args = env.pop('advanced_option', None)
+    secondary_model_args = env.pop('secondary_model_option', None)
+    if advanced_opt_args is not None:
+        advanced_opt = advanced_opt_cls(**advanced_opt_args)
+        env['advanced_option'] = advanced_opt
+    if secondary_model_args is not None:
+        env['secondary_model_option'] = SecondaryModelOption(**secondary_model_args)
+    return base_cls(**env)
 
 
 # <---- UVR response
