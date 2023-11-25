@@ -67,9 +67,10 @@ class SecondaryModelOption(UVRRequestObject):
 
 
 class VRArchAdvancedOption(UVRRequestObject):
-    def __init__(self, enable_tta: Optional[bool] = None, post_process: Optional[bool] = None,
+    def __init__(self, batch_size: Optional[str] = None, enable_tta: Optional[bool] = None, post_process: Optional[bool] = None,
                  post_process_threshold: Optional[float] = None, high_end_process: Optional[bool] = None) -> None:
         super().__init__()
+        self.batch_size = batch_size
         self.enable_tta = enable_tta
         self.post_process = post_process
         self.post_process_threshold = post_process_threshold
@@ -92,46 +93,56 @@ class VRArchRequest(UVREnvRequest):
 
 
 class MDXNetArchAdvancedOption(UVRRequestObject):
-    def __init__(self, enable_chunks: Optional[bool] = None, chunks: Optional[str] = None, chunk_margin: Optional[int] = None, denoise_output: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
+    def __init__(self, volume_compensation: Optional[Union[str, float]] = None,
+                 shift_conversion_pitch: Optional[int] = None, denoise_output: Optional[str] = None,
+                 match_freq_cut_off: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
         super().__init__()
-        self.enable_chunks = enable_chunks
-        self.chunks = chunks
-        self.chunk_margin = chunk_margin
+        self.volume_compensation = volume_compensation
+        self.shift_conversion_pitch = shift_conversion_pitch
         self.denoise_output = denoise_output
+        self.match_freq_cut_off = match_freq_cut_off
         self.spectral_inversion = spectral_inversion
 
 
+class MDXNet23ArchOnlyAdvancedOption(UVRRequestObject):
+    def __init__(self, batch_size: Optional[Union[str, int]] = None, # overlap: Optional[int] = None,
+                 segment_default: Optional[bool] = None, combine_stems: Optional[bool] = None) -> None:
+        super().__init__()
+        self.batch_size = batch_size
+        # self.overlap = overlap
+        self.segment_default = segment_default
+        self.combine_stems = combine_stems
+
+
 class MDXNetArchRequest(UVREnvRequest):
-    def __init__(self, model_name: str, batch_size: Optional[str] = None, volume_compensation: Optional[str] = None,
+    def __init__(self, model_name: str, segment_size: Optional[int] = None, overlap: Optional[Union[float, str]] = None,
+                 # common option
                  gpu_conversion: Optional[bool] = None, vocal_only: Optional[bool] = None,
                  inst_only: Optional[bool] = None, sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[MDXNetArchAdvancedOption] = None,
+                 mdxnet23_advanced_option: Optional[MDXNet23ArchOnlyAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
         super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
                          output_format)
-        self.batch_size = batch_size
-        self.volume_compensation = volume_compensation
+        self.segment_size = segment_size
+        self.overlap = overlap
         self.advanced_option = advanced_option
+        self.mdxnet23_advanced_option = mdxnet23_advanced_option
         self.secondary_model_option = secondary_model_option
 
 
 class DemucsArchAdvancedOption(UVRRequestObject):
     def __init__(self, shifts: Optional[int] = None, overlap: Optional[float] = None,
-                 enable_chunks: Optional[bool] = None, chunks: Optional[str] = None,
-                 chunk_margin: Optional[int] = None, split_mode: Optional[bool] = None,
-                 combine_stems: Optional[bool] = None, spectral_inversion: Optional[bool] = None,
-                 mixer_mode: Optional[bool] = False) -> None:
+                 shift_conversion_pitch: Optional[int] = None, split_mode: Optional[bool] = None,
+                 combine_stems: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
         super().__init__()
         self.shifts = shifts
         self.overlap = overlap
-        self.enable_chunks = enable_chunks
-        self.chunks = chunks
-        self.chunk_margin = chunk_margin
+        self.shift_conversion_pitch = shift_conversion_pitch
         self.split_mode = split_mode
         self.combine_stems = combine_stems
         self.spectral_inversion = spectral_inversion
-        self.mixer_mode = mixer_mode
 
 
 class DemucsArchRequest(UVREnvRequest):
@@ -201,45 +212,38 @@ def serialize_request_json(uvr_request: UVRRequest) -> str:
     return json.dumps(root, separators=(',', ':'))
 
 
-def _json_to_dict(request_json: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
-    if isinstance(request_json, str):
-        return json.loads(request_json)
-    return request_json.copy()
-
-
 def deserialize_request_json(request_json: Union[str, Dict[str, Any]]) -> UVRRequest:
-    request_json = _json_to_dict(request_json)
+    if isinstance(request_json, str):
+        request_json = json.loads(request_json)
+    else:
+        request_json = request_json.copy()
     env = request_json.pop('env', None)
     if env is not None:
-        request_json['env'] = deserialize_env_request_json(env)
+        req_type = EProcessMethod(env.pop('process_method'))
+        if req_type == EProcessMethod.VR_MODE:
+            advanced_opt_cls = VRArchAdvancedOption
+            base_cls = VRArchRequest
+        elif req_type == EProcessMethod.MDX_MODE:
+            advanced_opt_cls = MDXNetArchAdvancedOption
+            base_cls = MDXNetArchRequest
+        elif req_type == EProcessMethod.DEMUCS_MODE:
+            advanced_opt_cls = DemucsArchAdvancedOption
+            base_cls = DemucsArchRequest
+        elif req_type == EProcessMethod.ENSEMBLE_MODE:
+            advanced_opt_cls = EnsembleModeAdvancedOption
+            base_cls = EnsembleModeRequest
+        else:
+            raise ValueError('Invalid process_method')
+        advanced_opt_args = env.pop('advanced_option', None)
+        secondary_model_args = env.pop('secondary_model_option', None)
+        if advanced_opt_args is not None:
+            advanced_opt = advanced_opt_cls(**advanced_opt_args)
+            env['advanced_option'] = advanced_opt
+        if secondary_model_args is not None:
+            env['secondary_model_option'] = SecondaryModelOption(**secondary_model_args)
+        env = base_cls(**env)
+        request_json['env'] = env
     return UVRRequest(**request_json)
-
-
-def deserialize_env_request_json(request_json: Union[str, Dict[str, Any]]) -> UVREnvRequest:
-    env = _json_to_dict(request_json)
-    req_type = EProcessMethod(env.pop('process_method'))
-    if req_type == EProcessMethod.VR_MODE:
-        advanced_opt_cls = VRArchAdvancedOption
-        base_cls = VRArchRequest
-    elif req_type == EProcessMethod.MDX_MODE:
-        advanced_opt_cls = MDXNetArchAdvancedOption
-        base_cls = MDXNetArchRequest
-    elif req_type == EProcessMethod.DEMUCS_MODE:
-        advanced_opt_cls = DemucsArchAdvancedOption
-        base_cls = DemucsArchRequest
-    elif req_type == EProcessMethod.ENSEMBLE_MODE:
-        advanced_opt_cls = EnsembleModeAdvancedOption
-        base_cls = EnsembleModeRequest
-    else:
-        raise ValueError('Invalid process_method')
-    advanced_opt_args = env.pop('advanced_option', None)
-    secondary_model_args = env.pop('secondary_model_option', None)
-    if advanced_opt_args is not None:
-        advanced_opt = advanced_opt_cls(**advanced_opt_args)
-        env['advanced_option'] = advanced_opt
-    if secondary_model_args is not None:
-        env['secondary_model_option'] = SecondaryModelOption(**secondary_model_args)
-    return base_cls(**env)
 
 
 # <---- UVR response
@@ -253,13 +257,14 @@ class UVRCallState(IntEnum):
 class TaskContext:
     def __init__(self, request: Optional[UVRRequest], final_output_file: Optional[str] = None,
                  task_id: Optional[str] = None, task_state: UVRCallState = UVRCallState.FAILED,
-                 task_log: str = ''):
+                 task_log: str = '', task_progress: int = 0):
         self.request = request
         # the final output file path may be differ from requested file path (as handled by UVR itself)
         self.final_output_file = final_output_file
         self.task_id = task_id
         self.task_log = task_log
         self.task_state = task_state
+        self.task_progress = task_progress
 
 
 def deserialize_response_json(resp: Union[str, dict]) -> TaskContext:
@@ -269,24 +274,26 @@ def deserialize_response_json(resp: Union[str, dict]) -> TaskContext:
                        final_output_file=resp['final_output_file'],
                        task_id=resp['task_id'],
                        task_log=resp['task_log'],
-                       task_state=UVRCallState(resp['task_state']))
+                       task_state=UVRCallState(resp['task_state']),
+                       task_progress=resp['task_progress'])
 
 # <---- End UVR API
 
 
 def main():
-    input_path = 'd:/CloudMusic/森永真由美 - 華鳥風月.flac'
-    output_path = 'z:/bbb.flac'
+    # input_path = 'd:/CloudMusic/森永真由美 - 華鳥風月.flac'
+    # output_path = 'z:/bbb.flac'
+    input_path = 'z:/bbb_(Vocals).flac'
+    output_path = 'z:/ccc.flac'
 
     import requests
     from time import sleep
 
     s = requests.Session()
-    # env = VRArchRequest('9_HP2-UVR', vocal_only=True, gpu_conversion=True, inst_only=False,
-    #                     output_format=EOutputFormat.FLAC)
-    env = EnsembleModeRequest(['VR Arc: 9_HP2-UVR', 'Demucs: v4 | htdemucs_ft'], stem_pair='Vocals/Instrumental',
-                              ensemble_algorithm='Max Spec/Min Spec', gpu_conversion=True,
-                              primary_stem_only=False, secondary_stem_only=False, sample_mode=False)
+    # env = MDXNetArchRequest('MDX23C-InstVoc HQ', gpu_conversion=True, vocal_only=True, inst_only=False, output_format=EOutputFormat.FLAC,
+    #                         secondary_model_option=SecondaryModelOption(False))
+    env = VRArchRequest('UVR-BVE-4B_SN-44100-1', gpu_conversion=True, vocal_only=False, inst_only=True, output_format=EOutputFormat.FLAC, 
+                        secondary_model_option=SecondaryModelOption(False))
     req = UVRRequest(input_path, output_path, env)
     req_json = serialize_request_json(req)
     print(req_json)

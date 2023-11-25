@@ -6,7 +6,7 @@ A python CLI pipeline script for running UVR tasks, So-VITS-SVC model inference 
 
 Before running pipeline script, the following software must be installed first:
 
-1. [UltimateVocalRemoverGUI] v5.5.1
+1. [UltimateVocalRemoverGUI] v5.6.0
 2. [FFMpeg]
 3. Latest version of [So-VITS-SVC 4.1] (Chinese document)
 

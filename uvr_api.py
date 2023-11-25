@@ -15,9 +15,10 @@ if TYPE_CHECKING:
 
 
 __all__ = ['EProcessMethod', 'EOutputFormat', 'get_last_check_failed_source', 'UVREnvRequest', 'VRArchAdvancedOption',
-           'VRArchRequest', 'MDXNetArchAdvancedOption', 'MDXNetArchRequest', 'DemucsArchAdvancedOption',
-           'DemucsArchRequest', 'EnsembleModeAdvancedOption', 'EnsembleModeRequest', 'deserialize_request_json',
-           'serialize_request_json', 'SecondaryModelOption', 'deserialize_env_request_json']
+           'VRArchRequest', 'MDXNetArchAdvancedOption', 'MDXNet23ArchOnlyAdvancedOption', 'MDXNetArchRequest',
+           'DemucsArchAdvancedOption', 'DemucsArchRequest', 'EnsembleModeAdvancedOption', 'EnsembleModeRequest',
+           'deserialize_request_json', 'serialize_request_json', 'SecondaryModelOption',
+           'deserialize_env_request_json']
 _local = threading.local()
 
 
@@ -76,6 +77,24 @@ def _run_fn_in_non_main_thread_and_wait(fn: callable):
     return ret
 
 
+def _perform_tk_value_set(original_value, target_var):
+    if original_value is None:
+        return
+    target_value = target_var.get()
+    if isinstance(target_value, bool):
+        if not isinstance(original_value, bool):
+            raise TypeError(f'Invalid type {type(original_value)!r} from original_value, expected: bool')
+        if target_value != original_value:
+            target_var.set(original_value)
+    elif isinstance(target_value, str):
+        str_original_value = str(original_value)
+        if str_original_value != target_value:
+            target_var.set(str_original_value)
+    else:
+        raise TypeError(f'Invalid type {type(target_value)!r} from target_var, expected: bool or str')
+# TODO: support vocal splitter feature
+
+
 class UVREnvRequest(IEnvAutomation):
     """UVR request class for setting required running environments"""
     def __init__(self, process_method: Union[str, EProcessMethod],
@@ -101,16 +120,13 @@ class UVREnvRequest(IEnvAutomation):
         """setting UVR GUI to specific environment. Run `check_setup_prerequisite()` first before call this automation function!"""
         if uvr.chosen_process_method_var.get() != self.process_method.value:
             uvr.chosen_process_method_var.set(self.process_method.value)
-            uvr.update_checkbox_text()
+            uvr.selection_action_process_method(self.process_method.value, from_widget=True, is_from_conv_menu=True)
         self._select_model(uvr)
         if self.gpu_conversion is not None:
             gpu_conversion = self.gpu_conversion and uvr.is_gpu_available
-            if gpu_conversion != uvr.is_gpu_conversion_var.get():
-                uvr.is_gpu_conversion_var.set(gpu_conversion)
-        if self.sample_mode is not None and uvr.model_sample_mode_var.get() != self.sample_mode:
-            uvr.model_sample_mode_var.set(self.sample_mode)
-        if self.output_format is not None and uvr.save_format_var.get() != self.output_format.value:
-            uvr.save_format_var.set(self.output_format.value)
+            _perform_tk_value_set(gpu_conversion, uvr.is_gpu_conversion_var)
+        _perform_tk_value_set(self.sample_mode, uvr.model_sample_mode_var)
+        _perform_tk_value_set(self.output_format.value, uvr.save_format_var)
         self._set_vocal_inst_opt(uvr, self.model_name)
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
@@ -214,33 +230,30 @@ class SecondaryModelOption(IEnvAutomation):
 
 
 class VRArchAdvancedOption(IEnvAutomation):
-    def __init__(self, enable_tta: Optional[bool] = None, post_process: Optional[bool] = None,
+    def __init__(self, batch_size: Optional[str] = None, enable_tta: Optional[bool] = None, post_process: Optional[bool] = None,
                  post_process_threshold: Optional[float] = None, high_end_process: Optional[bool] = None) -> None:
         super().__init__()
+        self.batch_size = batch_size
         self.enable_tta = enable_tta
         self.post_process = post_process
         self.post_process_threshold = post_process_threshold
         self.high_end_process = high_end_process
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
-        # cspell:disable-next-line
-        if self.post_process_threshold is not None and str(self.post_process_threshold) not in constants.POST_PROCESSES_THREASHOLD_VALUES:
-            return _record_last_check_failed_source('Invalid post_process_threshold')
         return True
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
-        if self.enable_tta is not None and self.enable_tta != uvr.is_tta_var.get():
-            uvr.is_tta_var.set(self.enable_tta)
-        if self.post_process is not None and self.post_process != uvr.is_post_process_var.get():
-            uvr.is_post_process_var.set(self.post_process)
-        if self.post_process_threshold is not None and str(self.post_process_threshold) != uvr.post_process_threshold_var.get():
-            uvr.post_process_threshold_var.set(str(self.post_process_threshold))
-        if self.high_end_process is not None and self.high_end_process != uvr.is_high_end_process_var.get():
-            uvr.is_high_end_process_var.set(self.high_end_process)
+        _perform_tk_value_set(self.batch_size, uvr.batch_size_var)
+        _perform_tk_value_set(self.enable_tta, uvr.is_tta_var)
+        _perform_tk_value_set(self.post_process, uvr.is_post_process_var)
+        if self.post_process is not None:
+            _perform_tk_value_set(self.post_process_threshold, uvr.post_process_threshold_var)
+        _perform_tk_value_set(self.high_end_process, uvr.is_high_end_process_var)
 
 
 class VRArchRequest(UVREnvRequest):
     def __init__(self, model_name: str, window_size: Optional[int] = None, aggression_setting: Optional[int] = None,
+                 # common option
                  gpu_conversion: Optional[bool] = None, vocal_only: Optional[bool] = None,
                  inst_only: Optional[bool] = None, sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
@@ -256,10 +269,6 @@ class VRArchRequest(UVREnvRequest):
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
         if not super().check_setup_prerequisite(uvr):
             return False
-        if self.window_size is not None and str(self.window_size) not in constants.VR_WINDOW:
-            return _record_last_check_failed_source('Invalid window_size')
-        if self.aggression_setting is not None and self.aggression_setting not in constants.VR_AGGRESSION:
-            return _record_last_check_failed_source('Invalid aggression_setting')
         if self.advanced_option is not None and not self.advanced_option.check_setup_prerequisite(uvr):
             return False
         if self.secondary_model_option is not None and not self.secondary_model_option.check_setup_prerequisite(uvr):
@@ -271,10 +280,8 @@ class VRArchRequest(UVREnvRequest):
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
-        if self.window_size is not None and str(self.window_size) != uvr.window_size_var.get():
-            uvr.window_size_var.set(str(self.window_size))
-        if self.aggression_setting is not None and str(self.aggression_setting) != uvr.aggression_setting_var.get():
-            uvr.aggression_setting_var.set(str(self.aggression_setting))
+        _perform_tk_value_set(self.window_size, uvr.window_size_var)
+        _perform_tk_value_set(self.aggression_setting, uvr.aggression_setting_var)
         if self.advanced_option is not None:
             self.advanced_option.setup(uvr)
         if self.secondary_model_option is not None:
@@ -282,56 +289,71 @@ class VRArchRequest(UVREnvRequest):
 
 
 class MDXNetArchAdvancedOption(IEnvAutomation):
-    def __init__(self, enable_chunks: Optional[bool] = None, chunks: Optional[str] = None, chunk_margin: Optional[int] = None, denoise_output: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
+    def __init__(self, volume_compensation: Optional[Union[str, float]] = None,
+                 shift_conversion_pitch: Optional[int] = None, denoise_output: Optional[str] = None,
+                 match_freq_cut_off: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
         super().__init__()
-        self.enable_chunks = enable_chunks
-        self.chunks = chunks
-        self.chunk_margin = chunk_margin
+        self.volume_compensation = volume_compensation
+        self.shift_conversion_pitch = shift_conversion_pitch
         self.denoise_output = denoise_output
+        self.match_freq_cut_off = match_freq_cut_off
         self.spectral_inversion = spectral_inversion
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
-        if self.chunks is not None and str(self.chunks) not in constants.CHUNKS:
-            return _record_last_check_failed_source('Invalid chunks')
-        if self.chunk_margin is not None and str(self.chunk_margin) not in constants.MARGIN_SIZE:
-            return _record_last_check_failed_source('Invalid chunk_margin')
+        if self.denoise_output is not None and self.denoise_output not in constants.MDX_DENOISE_OPTION:
+            return _record_last_check_failed_source('Invalid denoise_output')
         return True
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
-        if self.enable_chunks is not None and self.enable_chunks != uvr.is_chunk_mdxnet_var.get():
-            uvr.is_chunk_mdxnet_var.set(self.enable_chunks)
-        if self.chunks is not None and self.chunks != uvr.chunks_var.get():
-            uvr.chunks_var.set(self.chunks)
-        if self.chunk_margin is not None and str(self.chunk_margin) != uvr.margin_var.get():
-            uvr.margin_var.set(str(self.chunk_margin))
-        if self.denoise_output is not None and self.denoise_output != uvr.is_denoise_var.get():
-            uvr.is_denoise_var.set(self.denoise_output)
-        if self.spectral_inversion is not None and self.spectral_inversion != uvr.is_invert_spec_var.get():
-            uvr.is_invert_spec_var.set(self.spectral_inversion)
+        _perform_tk_value_set(self.volume_compensation, uvr.compensate_var)
+        _perform_tk_value_set(self.shift_conversion_pitch, uvr.semitone_shift_var)
+        _perform_tk_value_set(self.denoise_output, uvr.denoise_option_var)
+        _perform_tk_value_set(self.match_freq_cut_off, uvr.is_match_frequency_pitch_var)
+        _perform_tk_value_set(self.spectral_inversion, uvr.is_invert_spec_var)
+
+
+class MDXNet23ArchOnlyAdvancedOption(IEnvAutomation):
+    def __init__(self, batch_size: Optional[Union[str, int]] = None, # overlap: Optional[int] = None,
+                 segment_default: Optional[bool] = None, combine_stems: Optional[bool] = None) -> None:
+        super().__init__()
+        self.batch_size = batch_size
+        # self.overlap = overlap
+        self.segment_default = segment_default
+        self.combine_stems = combine_stems
+
+    def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
+        return True
+
+    def setup(self, uvr: 'MainWindowOverwrite') -> None:
+        _perform_tk_value_set(self.batch_size, uvr.mdx_batch_size_var)
+        _perform_tk_value_set(self.segment_default, uvr.is_mdx_c_seg_def_var)
+        _perform_tk_value_set(self.combine_stems, uvr.is_mdx23_combine_stems_var)
 
 
 class MDXNetArchRequest(UVREnvRequest):
-    def __init__(self, model_name: str, batch_size: Optional[str] = None, volume_compensation: Optional[str] = None,
+    def __init__(self, model_name: str, segment_size: Optional[int] = None, overlap: Optional[Union[float, str]] = None,
+                 # common option
                  gpu_conversion: Optional[bool] = None, vocal_only: Optional[bool] = None,
                  inst_only: Optional[bool] = None, sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[MDXNetArchAdvancedOption] = None,
+                 mdxnet23_advanced_option: Optional[MDXNet23ArchOnlyAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
         super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
                          output_format)
-        self.batch_size = batch_size
-        self.volume_compensation = volume_compensation
+        self.segment_size = segment_size
+        self.overlap = overlap
         self.advanced_option = advanced_option
+        self.mdxnet23_advanced_option = mdxnet23_advanced_option
         self.secondary_model_option = secondary_model_option
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
         if not super().check_setup_prerequisite(uvr):
             return False
-        if self.batch_size is not None and self.batch_size not in constants.BATCH_SIZE:
-            return _record_last_check_failed_source('Invalid batch_size')
-        if self.volume_compensation is not None and self.volume_compensation not in constants.VOL_COMPENSATION:
-            return _record_last_check_failed_source('Invalid volume_compensation')
+        # both segment_size and overlap supports user input
         if self.advanced_option is not None and not self.advanced_option.check_setup_prerequisite(uvr):
+            return False
+        if self.mdxnet23_advanced_option is not None and not self.mdxnet23_advanced_option.check_setup_prerequisite(uvr):
             return False
         if self.secondary_model_option is not None and not self.secondary_model_option.check_setup_prerequisite(uvr):
             return False
@@ -342,72 +364,51 @@ class MDXNetArchRequest(UVREnvRequest):
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
-        if self.batch_size is not None and self.batch_size != uvr.batch_size_var.get():
-            uvr.batch_size_var.set(self.batch_size)
-        if self.volume_compensation is not None and self.volume_compensation != uvr.compensate_var.get():
-            uvr.compensate_var.set(self.volume_compensation)
+        _perform_tk_value_set(self.segment_size, uvr.mdx_segment_size_var)
+        # both overlap_mdx_var and overlap_mdx23_var are controlled using this variable
+        _perform_tk_value_set(self.overlap, uvr.overlap_mdx_var)
+        _perform_tk_value_set(self.overlap, uvr.overlap_mdx23_var)
         if self.advanced_option is not None:
             self.advanced_option.setup(uvr)
+        if self.mdxnet23_advanced_option is not None:
+            self.mdxnet23_advanced_option.setup(uvr)
         if self.secondary_model_option is not None:
             self.secondary_model_option.setup(uvr)
 
 
 class DemucsArchAdvancedOption(IEnvAutomation):
     def __init__(self, shifts: Optional[int] = None, overlap: Optional[float] = None,
-                 enable_chunks: Optional[bool] = None, chunks: Optional[str] = None,
-                 chunk_margin: Optional[int] = None, split_mode: Optional[bool] = None,
-                 combine_stems: Optional[bool] = None, spectral_inversion: Optional[bool] = None,
-                 mixer_mode: Optional[bool] = False) -> None:
+                 shift_conversion_pitch: Optional[int] = None, split_mode: Optional[bool] = None,
+                 combine_stems: Optional[bool] = None, spectral_inversion: Optional[bool] = None) -> None:
         super().__init__()
         self.shifts = shifts
         self.overlap = overlap
-        self.enable_chunks = enable_chunks
-        self.chunks = chunks
-        self.chunk_margin = chunk_margin
+        self.shift_conversion_pitch = shift_conversion_pitch
         self.split_mode = split_mode
         self.combine_stems = combine_stems
         self.spectral_inversion = spectral_inversion
-        self.mixer_mode = mixer_mode
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
-        if self.shifts is not None and self.shifts not in constants.DEMUCS_SHIFTS:
-            return _record_last_check_failed_source('Invalid shifts')
-        if self.overlap is not None and self.overlap not in constants.DEMUCS_OVERLAP:
-            return _record_last_check_failed_source('Invalid overlap')
-        if self.chunks is not None and str(self.chunks) not in constants.CHUNKS:
-            return _record_last_check_failed_source('Invalid chunks')
-        if self.chunk_margin is not None and str(self.chunk_margin) not in constants.MARGIN_SIZE:
-            return _record_last_check_failed_source('Invalid chunk_margin')
         return True
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
-        if self.shifts is not None and str(self.shifts) != uvr.shifts_var.get():
-            uvr.shifts_var.set(str(self.shifts))
-        if self.overlap is not None and str(self.overlap) != uvr.overlap_var.get():
-            uvr.overlap_var.set(str(self.overlap))
-        if self.enable_chunks is not None and self.enable_chunks != uvr.is_chunk_demucs_var.get():
-            uvr.is_chunk_demucs_var.set(self.enable_chunks)
-        if self.chunks is not None and self.chunks != uvr.chunks_demucs_var.get():
-            uvr.chunks_demucs_var.set(self.chunks)
-        if self.chunk_margin is not None and str(self.chunk_margin) != uvr.margin_demucs_var.get():
-            uvr.margin_demucs_var.set(str(self.chunk_margin))
-        if self.split_mode is not None and self.split_mode != uvr.is_split_mode_var.get():
-            uvr.is_split_mode_var.set(self.split_mode)
-        if self.combine_stems is not None and self.combine_stems != uvr.is_demucs_combine_stems_var.get():
-            uvr.is_demucs_combine_stems_var.set(self.combine_stems)
-        if self.spectral_inversion is not None and self.spectral_inversion != uvr.is_invert_spec_var.get():
-            uvr.is_invert_spec_var.set(self.spectral_inversion)
-        if self.mixer_mode is not None and self.mixer_mode != uvr.is_mixer_mode_var.get():
-            uvr.is_mixer_mode_var.set(self.mixer_mode)
+        _perform_tk_value_set(self.shift, uvr.shifts_var)
+        _perform_tk_value_set(self.overlap, uvr.overlap_var)
+        _perform_tk_value_set(self.shift_conversion_pitch, uvr.semitone_shift_var)
+        _perform_tk_value_set(self.split_mode, uvr.is_split_mode_var)
+        _perform_tk_value_set(self.combine_stems, uvr.is_demucs_combine_stems_var)
+        _perform_tk_value_set(self.spectral_inversion, uvr.is_invert_spec_var)
 
 
 class DemucsArchRequest(UVREnvRequest):
     def __init__(self, model_name: str, stem: Optional[str] = constants.VOCAL_STEM, segment: Optional[str] = None,
                  primary_stem_only: Optional[bool] = None, secondary_stem_only: Optional[bool] = None,
+                 # common option
                  gpu_conversion: Optional[bool] = None, sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[DemucsArchAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
+        # TODO: pre-process model
         super().__init__(EProcessMethod.DEMUCS_MODE, model_name, gpu_conversion, None, None, sample_mode, output_format)
         self.stem = stem
         self.primary_stem_only = primary_stem_only
@@ -419,8 +420,6 @@ class DemucsArchRequest(UVREnvRequest):
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
         if not super().check_setup_prerequisite(uvr):
             return False
-        if self.segment is not None and self.segment not in constants.DEMUCS_SEGMENTS:
-            return _record_last_check_failed_source('Invalid segment')
         if self.stem is not None:
             # logic in update_button_states()
             if constants.DEMUCS_UVR_MODEL in self.model_name:
@@ -442,12 +441,9 @@ class DemucsArchRequest(UVREnvRequest):
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
-        if self.primary_stem_only is not None and self.primary_stem_only != uvr.is_primary_stem_only_var.get():
-            uvr.is_primary_stem_only_var.set(self.primary_stem_only)
-        if self.secondary_stem_only is not None and self.secondary_stem_only != uvr.is_secondary_stem_only_var.get():
-            uvr.is_secondary_stem_only_var.set(self.secondary_stem_only)
-        if self.stem is not None:
-            uvr.demucs_stems_var.set(self.stem)
+        _perform_tk_value_set(self.primary_stem_only, uvr.is_primary_stem_only_var)
+        _perform_tk_value_set(self.secondary_stem_only, uvr.is_secondary_stem_only_var)
+        _perform_tk_value_set(self.stem, uvr.demucs_stems_var)
         if self.advanced_option is not None:
             self.advanced_option.setup(uvr)
         if self.secondary_model_option is not None:
@@ -455,19 +451,20 @@ class DemucsArchRequest(UVREnvRequest):
 
 
 class EnsembleModeAdvancedOption(IEnvAutomation):
-    def __init__(self, save_all_outputs: Optional[bool] = None, append_ensemble_name: Optional[bool] = None) -> None:
+    def __init__(self, save_all_outputs: Optional[bool] = None, append_ensemble_name: Optional[bool] = None,
+                  ensemble_waveforms: Optional[bool] = None) -> None:
         super().__init__()
         self.save_all_outputs = save_all_outputs
         self.append_ensemble_name = append_ensemble_name
+        self.ensemble_waveforms = ensemble_waveforms
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
         return True
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
-        if self.save_all_outputs is not None and self.save_all_outputs != uvr.is_save_all_outputs_ensemble_var.get():
-            uvr.is_save_all_outputs_ensemble_var.set(self.save_all_outputs)
-        if self.append_ensemble_name is not None and self.append_ensemble_name != uvr.is_append_ensemble_name_var.get():
-            uvr.is_append_ensemble_name_var.set(self.append_ensemble_name)
+        _perform_tk_value_set(self.save_all_outputs, uvr.is_save_all_outputs_ensemble_var)
+        _perform_tk_value_set(self.append_ensemble_name, uvr.is_append_ensemble_name_var)
+        _perform_tk_value_set(self.ensemble_waveforms, uvr.is_wav_ensemble_var)
 
 
 class EnsembleModeRequest(UVREnvRequest):
@@ -528,16 +525,12 @@ class EnsembleModeRequest(UVREnvRequest):
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
-        if self.stem_pair is not None and self.stem_pair != uvr.ensemble_main_stem_var.get():
-            uvr.ensemble_main_stem_var.set(self.stem_pair)
-            uvr.selection_action_ensemble_stems(self.stem_pair)
-        if self.ensemble_algorithm is not None and self.ensemble_algorithm != uvr.ensemble_type_var.get():
-            uvr.ensemble_type_var.set(self.ensemble_algorithm)
+        _perform_tk_value_set(self.stem_pair, uvr.ensemble_main_stem_var)
+        uvr.selection_action_ensemble_stems(self.stem_pair)
+        _perform_tk_value_set(self.ensemble_algorithm, uvr.ensemble_type_var)
         self._select_ensemble_models(uvr)
-        if self.primary_stem_only is not None and self.primary_stem_only != uvr.is_primary_stem_only_var.get():
-            uvr.is_primary_stem_only_var.set(self.primary_stem_only)
-        if self.secondary_stem_only is not None and self.secondary_stem_only != uvr.is_secondary_stem_only_var.get():
-            uvr.is_secondary_stem_only_var.set(self.secondary_stem_only)
+        _perform_tk_value_set(self.primary_stem_only, uvr.is_primary_stem_only_var)
+        _perform_tk_value_set(self.secondary_stem_only, uvr.is_secondary_stem_only_var)
         if self.advanced_option is not None:
             self.advanced_option.setup(uvr)
 
@@ -650,7 +643,9 @@ def _run_main():
         'env': {
             'process_method': EProcessMethod.VR_MODE,
             'model_name': '4_HP-Vocal-UVR',
-            'inst_only': True,
+            'gpu_conversion': True,
+            'inst_only': False,
+            'vocal_only': False,
             'secondary_model_option': {
                 'activate': False
             }
@@ -666,8 +661,11 @@ def _run_main():
             sleep(1)
             continue
         break
+    print('Wait mainloop signal')
+    uvr.gui_set_finished.wait()
+    # sleep(3)  # delay start
     check = req.check_setup_prerequisite(uvr)
-    print(check)
+    print(f'check_setup_prerequisite: {check}')
     if check:
         req.setup(uvr)
 

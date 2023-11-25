@@ -61,7 +61,7 @@ class UVRCallState(IntEnum):
 
 class TaskContext:
     def __init__(self, request: Optional[api.UVRRequest], task_id: Optional[str] = None,
-                 task_state: UVRCallState = UVRCallState.SCHEDULING, task_log: str = ''):
+                 task_state: UVRCallState = UVRCallState.SCHEDULING, task_log: str = '', task_progress: int = 0):
         self.request = request
         # the final output file path may be differ from requested file path (as handled by UVR itself)
         self.final_output_file = None
@@ -71,6 +71,7 @@ class TaskContext:
         self.task_wait = Event()
         self.task_log = task_log
         self.task_state = task_state
+        self.task_progress = task_progress
 
     def to_json(self):
         return {
@@ -78,7 +79,8 @@ class TaskContext:
             'final_output_file': self.final_output_file,
             'task_id': self.task_id,
             'task_log': self.task_log,
-            'task_state': self.task_state.value
+            'task_state': self.task_state.value,
+            'task_progress': self.task_progress
         }
 
 
@@ -184,8 +186,7 @@ class MainWindowOverwrite(MainWindow):
         self.command_Text.write = self._intercept_log_write
         self.work_thd = Thread(target=self._work_routine, daemon=True, name='UVRWorker')
         self.wait_event.set()  # set to idle
-        # self.gui_set_finished = Event()
-        # self.gui_set_finished.set()
+        self.gui_set_finished = Event()
 
     def _intercept_log_write(self, text):
         with self.task_log_mutex:
@@ -201,6 +202,7 @@ class MainWindowOverwrite(MainWindow):
         # cspell:disable-next-line
         print(f'error_dialoge: {message}')
         self.error_dialog_content = message
+        self.wait_event.set()  # exit task
 
     def process_initialize(self):
         self.wait_event.clear()
@@ -221,6 +223,10 @@ class MainWindowOverwrite(MainWindow):
         super().process_end(error=None)
         # call finished
         self.wait_event.set()
+
+    def mainloop(self):
+        self.gui_set_finished.set()
+        return super().mainloop()
 
     # <---- EXTERNAL calls
 
@@ -344,7 +350,7 @@ class MainWindowOverwrite(MainWindow):
         while True:
             try:
                 with self.task_dict_mutex:
-                    ctx = self.task_queue.popleft()
+                    ctx = self.task_queue.popleft()  # type: TaskContext
             except IndexError:
                 sleep(0.1)
                 continue
@@ -373,6 +379,7 @@ class MainWindowOverwrite(MainWindow):
             with self.task_dict_mutex:
                 if ctx.task_id in self.task_pending_ctx_dict:
                     del self.task_pending_ctx_dict[ctx.task_id]
+                ctx.task_progress = 100
                 self.task_finished_ctx_dict.set(ctx.task_id, ctx)
             self.current_running_task_id = None
 
@@ -418,11 +425,13 @@ class MainWindowOverwrite(MainWindow):
             if ctx is not None:
                 if ctx.task_id == self.current_running_task_id:
                     ctx.task_log = self.task_log.getvalue()
+                    ctx.task_progress = self.progress_bar_main_var.get()
                 return ctx
             ctx = self.task_finished_ctx_dict.get(task_id, None)
             if ctx is not None:
                 return ctx
-            ctx = TaskContext(request=None, task_id=task_id, task_state=UVRCallState.FAILED, task_log='Task not found')
+            ctx = TaskContext(request=None, task_id=task_id, task_state=UVRCallState.FAILED,
+                              task_log='Task not found', task_progress=0)
             return ctx
 
     def list_tasks(self) -> List[str]:
@@ -440,6 +449,7 @@ class MainWindowOverwrite(MainWindow):
 
 def _route_request(uvr_fn):
     q = unquote(request.query_string.decode())
+    print(q)
     json_data = json.loads(q)
     res = uvr_fn(json_data)
     if isinstance(res, TaskContext):
@@ -453,7 +463,9 @@ def run_app_non_blocking(*args, **kwargs):
     thd.start()
 
 
-def main():
+# <-- main block for UVR
+def main_v55x():
+    # works in v5.5.1
     try:
         from ctypes import windll, wintypes
         windll.user32.SetThreadDpiAwarenessContext(wintypes.HANDLE(-1))
@@ -467,6 +479,44 @@ def main():
     uvr.route_run_requests()
     run_app_non_blocking(FLASK_HTTP_HOST, FLASK_HTTP_PORT)
     uvr.mainloop()
+
+
+def main_v56x():
+    # verified v5.6.0
+    try:
+        from ctypes import windll, wintypes
+        windll.user32.SetThreadDpiAwarenessContext(wintypes.HANDLE(-1))
+    except Exception as e:
+        if UVR.OPERATING_SYSTEM == 'Windows':
+            print(e)
+
+    uvr = MainWindowOverwrite()
+    setattr(UVR, 'root', uvr)
+    uvr.update_checkbox_text()
+    uvr.is_root_defined_var.set(True)
+    uvr.is_check_splash = True
+
+    uvr.update() if UVR.is_windows else uvr.update_idletasks()
+    uvr.deiconify()
+    uvr.configure(bg=UVR.BG_COLOR)
+    # <-- external call before GUI main loop
+    uvr.accept_uvr_task_requests()
+    uvr.route_run_requests()
+    run_app_non_blocking(FLASK_HTTP_HOST, FLASK_HTTP_PORT)
+    # <-- end external call
+    uvr.mainloop()
+
+
+def main():
+    # TODO: functionality compatibility
+    from __version__ import VERSION
+    if VERSION.startswith('v5.6'):
+        return main_v56x()
+    # elif VERSION.startswith('v5.5'):
+    #     return main_v55x()
+    else:
+        print(f'Untested UVR version {VERSION}, use default v5.6.x main block, GUI startup may fail')
+        return main_v56x()
 
 
 if __name__ == '__main__':
