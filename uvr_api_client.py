@@ -255,7 +255,7 @@ class UVRCallState(IntEnum):
 
 
 class TaskContext:
-    def __init__(self, request: Optional[UVRRequest], final_output_file: Optional[str] = None,
+    def __init__(self, request: Optional[UVRRequest], final_output_file: Optional[Dict[str, str]] = None,
                  task_id: Optional[str] = None, task_state: UVRCallState = UVRCallState.FAILED,
                  task_log: str = '', task_progress: int = 0):
         self.request = request

@@ -361,6 +361,7 @@ class MDXNetArchRequest(UVREnvRequest):
 
     def _select_model(self, uvr: 'MainWindowOverwrite') -> None:
         uvr.mdx_net_model_var.set(self.model_name)
+        uvr.selection_action_models(self.model_name)
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
@@ -596,24 +597,26 @@ def deserialize_env_request_json(request_json: Union[str, Dict[str, Any]]) -> UV
     env = _json_to_dict(request_json)
     req_type = EProcessMethod(env.pop('process_method'))
     if req_type == EProcessMethod.VR_MODE:
-        advanced_opt_cls = VRArchAdvancedOption
+        advanced_opt_cls = {'advanced_option': VRArchAdvancedOption}
         base_cls = VRArchRequest
     elif req_type == EProcessMethod.MDX_MODE:
-        advanced_opt_cls = MDXNetArchAdvancedOption
+        advanced_opt_cls = {'advanced_option': MDXNetArchAdvancedOption,
+                            'mdxnet23_advanced_option': MDXNet23ArchOnlyAdvancedOption}
         base_cls = MDXNetArchRequest
     elif req_type == EProcessMethod.DEMUCS_MODE:
-        advanced_opt_cls = DemucsArchAdvancedOption
+        advanced_opt_cls = {'advanced_option': DemucsArchAdvancedOption}
         base_cls = DemucsArchRequest
     elif req_type == EProcessMethod.ENSEMBLE_MODE:
-        advanced_opt_cls = EnsembleModeAdvancedOption
+        advanced_opt_cls = {'advanced_option': EnsembleModeAdvancedOption}
         base_cls = EnsembleModeRequest
     else:
         raise ValueError('Invalid process_method')
-    advanced_opt_args = env.pop('advanced_option', None)
     secondary_model_args = env.pop('secondary_model_option', None)
-    if advanced_opt_args is not None:
-        advanced_opt = advanced_opt_cls(**advanced_opt_args)
-        env['advanced_option'] = advanced_opt
+    for key, cls in advanced_opt_cls.items():
+        opt_args = env.pop(key, None)
+        if opt_args is None:
+            continue
+        env[key] = cls(**opt_args)
     if secondary_model_args is not None:
         env['secondary_model_option'] = SecondaryModelOption(**secondary_model_args)
     return base_cls(**env)

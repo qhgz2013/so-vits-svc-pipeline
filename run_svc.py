@@ -77,14 +77,18 @@ class FileChangeWatcher:
         return diff_files, diff_dirs
 
 
-def get_vocal_and_inst_files(search_path):
+def get_vocal_and_inst_files(file_name, search_path=None):
     valid_filters = ['*.wav', '*.flac', '*.mp3']
-    files = filter(lambda x: search_path in x, chain(*tuple(glob(x) for x in valid_filters)))
+    if search_path is not None:
+        valid_filters = [os.path.join(search_path, '**', x) for x in valid_filters]
+    print(valid_filters)
+    files = filter(lambda x: file_name in x, chain(*tuple(glob(x, recursive=True) for x in valid_filters)))
     vocal_file = inst_file = None
     for file in files:
-        if 'vocal' in file.lower():
+        # find the best match files
+        if 'vocal' in file.lower() and (vocal_file is None or len(vocal_file) > len(file)):
             vocal_file = file
-        elif 'instrument' in file.lower():
+        elif 'instrument' in file.lower() and (inst_file is None or len(inst_file) > len(file)):
             inst_file = file
     if vocal_file is None:
         raise RuntimeError('Could not detect vocal file')
@@ -192,6 +196,8 @@ def main():
     # new option (rev 6):
     parser.add_argument('-uc', '--uvr_config', type=str, default=None,
                         help='Path for uvr_config.json (e.g., uvr_config_sample.json)')
+    parser.add_argument('-isp', '--input_search_path', type=str, default=None,
+                        help='Search path for input vocal & instrumental files (if skipping UVR procedure)')
 
     args, remains = parser.parse_known_args()
 
@@ -254,7 +260,7 @@ def main():
     if manual_input_path_mode:
         if uvr_exec:
             print('Failed to execute UVR task: fallback to manual input mode')
-        vocal_file, inst_file = get_vocal_and_inst_files(args.input)
+        vocal_file, inst_file = get_vocal_and_inst_files(args.input, args.input_search_path)
 
     # split vocal channels
     if args.separate_process:
@@ -387,5 +393,7 @@ def cleanup_generated_files():
 
 
 if __name__ == '__main__':
-    main()
-    cleanup_generated_files()
+    try:
+        main()
+    finally:
+        cleanup_generated_files()
