@@ -1,0 +1,14 @@
+{
+    "process_method": "MDX-Net",
+    "model_name": "UVR-MDX-NET Inst 3",
+    "gpu_conversion": true,
+    "vocal_only": false,
+    "inst_only": true,
+    "sample_mode": false,
+    "advanced_option": {
+        "denoise_output": "Standard"
+    },
+    "secondary_model_option": {
+        "activate": false
+    }
+}

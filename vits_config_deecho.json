@@ -54,7 +54,7 @@
         }
       ]
     },
-    "vocal_id": "vocal_remove_harmony",
+    "vocal_id": "vocal_de_echo",
     "inst_id": "inst_direct",
     "inst_weight": 1
   },
@@ -82,6 +82,12 @@
         "output_id": ["vocal_remove_harmony"],
         "config_source": "file",
         "config_file": "uvr_config/uvr_config_harmony.json"
+      },
+      {
+        "input_id": ["vocal_remove_harmony"],
+        "output_id": ["vocal_de_echo"],
+        "config_source": "file",
+        "config_file": "uvr_config/uvr_config_deecho.json"
       }
     ]
   }

@@ -1,0 +1,81 @@
+{
+  "file": { // {id: path}
+    "input": string, // input file
+    "output": string, // output file
+  }
+  "sys": {
+    "work_dir": string, // temp directory for saving on-the-fly audio files
+    "intermediate_file_ext": string // fix to ".wav" since vits will always convert others to wav
+  },
+  "vits": {
+    "src_dir": string,
+    // args for so-vits-svc 4.0 inference
+    // basic config
+    "model_path": string,
+    "config_path": string,
+    "clip": float,
+    "trans": [int],
+    // optional config
+    "auto_predict_f0": bool,
+    "cluster_model_path": string,
+    "cluster_infer_ratio": float,
+    "linear_gradient": float,
+    "f0_predictor": string,
+    "enhance": bool,
+    "shallow_diffusion": bool,
+    "use_spk_mix": bool,
+    "loudness_envelope_adjustment": float,
+    "feature_retrieval": bool,
+    // diffusion config
+    "diffusion_model_path": string,
+    "diffusion_config_path": string,
+    "k_step": int,
+    "second_encoding": bool,
+    "only_diffusion": bool,
+    // others
+    "slice_db": int,
+    "device": string, // leave null for auto choose
+    "noice_scale": float,
+    "pad_seconds": float,
+    "linear_gradient_retain": float,
+    "enhancer_adaptive_key": int,
+    "f0_filter_threshold": float
+  },
+  "down_mix": {
+    "separate_process": bool, // split L and R channel during vits conversion
+    "spk_list": {
+      "${spk_name}" [
+        {
+          "channel": string, // "L" or "R" or null, only works when separate_process == true
+          "weight": float, // loudness weight
+          "delay": float // ms
+        }
+      ]
+    },
+    "vocal_id": string, // vocal file id for vits, leave "input" for raw processing without UVR
+    "inst_id": string, // instrumental file id for down mix, could be set in "file" section
+    "inst_weight": float // loudness weight for inst track
+  }
+  "ffmpeg": {
+    "ffmpeg_path": string, // null for auto-detect
+    "ffprobe_path": string, // null for auto-detect
+  },
+  "uvr": {
+    "enable": bool,
+    "api_url": string,
+    "pipeline": [
+      {
+        "input_id": [string], // file_id or file_id#channel (channel="L" or "R")
+        "output_id": [string or output_obj], // input_id and output_id must have same length
+        "config_source": string, // "file" or "data"
+        "config_file": string, // set to config path when config_source == "file"
+        "config_data": {...} // UVR env data when config_source == "data"
+      }
+    ]
+  }
+}
+
+// output_obj:
+{
+  "${stem}": string
+}
