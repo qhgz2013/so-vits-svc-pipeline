@@ -1,0 +1,17 @@
+{
+    "process_method": "VR Architecture",
+    "model_name": "UVR-BVE-4B_SN-44100-1",
+    "gpu_conversion": true,
+    "vocal_only": false,
+    "inst_only": true,
+    "sample_mode": false,
+    "advanced_option": {
+        "enable_tta": true,
+        "post_process": true,
+        "post_process_threshold": 0.2,
+        "high_end_process": true
+    },
+    "secondary_model_option": {
+        "activate": false
+    }
+}

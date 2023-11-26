@@ -292,7 +292,7 @@ def main():
     s = requests.Session()
     # env = MDXNetArchRequest('MDX23C-InstVoc HQ', gpu_conversion=True, vocal_only=True, inst_only=False, output_format=EOutputFormat.FLAC,
     #                         secondary_model_option=SecondaryModelOption(False))
-    env = VRArchRequest('UVR-BVE-4B_SN-44100-1', gpu_conversion=True, vocal_only=False, inst_only=True, output_format=EOutputFormat.FLAC, 
+    env = VRArchRequest('UVR-BVE-4B_SN-44100-1', gpu_conversion=True, vocal_only=False, inst_only=True, output_format=EOutputFormat.FLAC,
                         secondary_model_option=SecondaryModelOption(False))
     req = UVRRequest(input_path, output_path, env)
     req_json = serialize_request_json(req)

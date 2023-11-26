@@ -1,0 +1,15 @@
+{
+    "process_method": "MDX-Net",
+    "model_name": "MDX23C-InstVoc HQ",
+    "gpu_conversion": true,
+    "vocal_only": false,
+    "inst_only": false,
+    "sample_mode": false,
+    "mdxnet23_advanced_option": {
+        "segment_default": true,
+        "combine_stems": true
+    },
+    "secondary_model_option": {
+        "activate": false
+    }
+}
