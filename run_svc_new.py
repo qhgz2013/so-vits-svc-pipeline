@@ -17,11 +17,11 @@ from warnings import warn
 
 # cspell:ignore vits,adelay,flac,amerge,channelsplit,getpid,ffprobe,aformat,workenv,libmp
 
-def build_vits_args(config, ext: str, spk_name: str, input_file: str) -> List[str]:
-    vits_cfg = config['vits']
+def build_vits_args(config, ext: str, spk_name: str, input_file: str, profile_name: str = 'default') -> List[str]:
+    vits_cfg = config['vits']['profile'][profile_name]
     if ext.startswith('.'):
         ext = ext[1:]
-    vits_py_executable = os.path.join(vits_cfg['src_dir'], 'workenv', 'python')
+    vits_py_executable = os.path.join(config['vits']['src_dir'], 'workenv', 'python')
     vits_args = [vits_py_executable, 'inference_main.py',
                  '--model_path', vits_cfg['model_path'],
                  '--config_path', vits_cfg['config_path'],
@@ -79,11 +79,12 @@ def build_vits_args(config, ext: str, spk_name: str, input_file: str) -> List[st
 
 
 class FileRegistration:
-    def __init__(self, work_dir: str) -> None:
+    def __init__(self, work_dir: str, keep_temp_file: bool = False) -> None:
         self.work_dir = os.path.join(work_dir, str(os.getpid()))
         os.makedirs(self.work_dir, exist_ok=True)
         self.files = dict()
         self.temp_file = set()
+        self.keep_temp_file = keep_temp_file
         self.daemon_thread = threading.Thread(target=self._daemon_thread_callback, name='FileRegistrationDaemon',
                                               daemon=False)
         self.daemon_thread.start()
@@ -106,7 +107,8 @@ class FileRegistration:
     def _daemon_thread_callback(self):
         while threading.main_thread().is_alive():
             sleep(0.5)
-        self.delete_temp_file()
+        if not self.keep_temp_file:
+            self.delete_temp_file()
 
     def delete_temp_file(self):
         for file_id in self.temp_file:
@@ -146,8 +148,8 @@ class ConfigCache:
         return self.cache[file]
 
 
-def execute_uvr_task(config: dict, input_file: str, output_file: Union[str, Dict[str, str]], env: dict) -> bool:
-    task_output_file = output_file if isinstance(output_file, str) else config['sys']['work_dir']
+def execute_uvr_task(config: dict, input_file: str, output_file: Union[str, Dict[str, str]], env: dict, work_dir: str) -> bool:
+    task_output_file = output_file if isinstance(output_file, str) else work_dir
     req = {'input_file': input_file, 'output_file': task_output_file, 'env': env}
     s = requests.session()
     url = config['uvr']['api_url']
@@ -174,7 +176,9 @@ def execute_uvr_task(config: dict, input_file: str, output_file: Union[str, Dict
         else:
             for stem, final_file in task.final_output_file.items():
                 if stem not in output_file:
-                    raise RuntimeError(f'output_id for stem "{stem}" is not defined')
+                    print(f'output_id for stem "{stem}" is not defined')
+                    os.remove(final_file)
+                    continue  # remove unnecessary output (not required in config)
                 if final_file != output_file[stem]:
                     shutil.move(final_file, output_file[stem])
         return True
@@ -245,65 +249,76 @@ def check_diff_file(new_files: List[str], ext) -> str:
     return new_sounds[0]
 
 
-def execute_vits_task(config: dict, file_reg: FileRegistration, ext: str):
+def execute_vits_task(config: dict, file_reg: FileRegistration, ext: str, profile_name: str = 'default'):
     sp = config['down_mix']['separate_process']
-    input_id = config['down_mix']['vocal_id']
-    temp_id = str(int(time()))
-    proc_file_ids = set()
-    vits_output_dir = os.path.join(config['vits']['src_dir'], 'results')
-    watcher = FileChangeWatcher(vits_output_dir)
-    for spk_name, mix_cfg_list in config['down_mix']['spk_list'].items():
-        for mix_cfg in mix_cfg_list:
-            if sp:
-                channel = mix_cfg["channel"]
-                assert channel in {'L', 'R'}
-                src_path = file_reg.get_file(f'{input_id}#{channel}')
-                vits_in_file_id = f'vits_in_{spk_name}_{temp_id}#{channel}'
-                vits_out_file_id = f'vits_out_{spk_name}#{channel}'
-            else:
-                src_path = file_reg.get_file(input_id)
-                vits_in_file_id = f'vits_in_{spk_name}_{temp_id}'
-                vits_out_file_id = f'vits_out_{spk_name}'
-            if vits_in_file_id in proc_file_ids:
-                continue  # already processed, duplicated task
-            proc_file_ids.add(vits_in_file_id)
-            assert src_path is not None
-            # copy to "raw" dir in so-vits-svc
-            new_src_path = os.path.join(config['vits']['src_dir'], 'raw', f'{vits_in_file_id}{ext}')
-            shutil.copy(src_path, new_src_path)
-            file_reg.register_file(vits_in_file_id, new_src_path, delete_after_finish=True)
-            with watcher:
-                vits_args = build_vits_args(config, ext, spk_name, new_src_path)
-                print(f'Running VITS with args: {vits_args}')
-                proc = subprocess.Popen(vits_args, cwd=config['vits']['src_dir'])
-                if proc.wait() != 0:
-                    raise RuntimeError(f'VITS exited with return code {proc.returncode}')
-                new_file = check_diff_file(watcher.generate_diff_files()[0], ext)
-                renamed_file = file_reg.register_tmp_file_in_work_dir(vits_out_file_id, ext)
-                shutil.move(new_file, renamed_file)
+    vocal_proc_list = config['down_mix']['vocal']
+    for vocal_proc_entry in vocal_proc_list:
+        input_id = vocal_proc_entry['id']
+        vits_profile = vocal_proc_entry.get('profile', profile_name)
+        temp_id = str(int(time()))
+        proc_file_ids = set()
+        vits_output_dir = os.path.join(config['vits']['src_dir'], 'results')
+        watcher = FileChangeWatcher(vits_output_dir)
+        for spk_name, mix_cfg_list in vocal_proc_entry['spk_list'].items():
+            for mix_cfg in mix_cfg_list:
+                if sp:
+                    channel_list = mix_cfg["channel"]
+                    if isinstance(channel_list, str):
+                        channel_list = [channel_list]
+                    assert all(channel in {'L', 'R'} for channel in channel_list)
+                    src_path_list = [file_reg.get_file(f'{input_id}#{channel}') for channel in channel_list]
+                    vits_in_file_id_list = [f'vits_in_{input_id}_{spk_name}_{temp_id}#{channel}' for channel in channel_list]
+                    vits_out_file_id_list = [f'vits_out_{input_id}_{spk_name}#{channel}' for channel in channel_list]
+                else:
+                    src_path_list = [file_reg.get_file(input_id)]
+                    vits_in_file_id_list = [f'vits_in_{input_id}_{spk_name}_{temp_id}']
+                    vits_out_file_id_list = [f'vits_out_{input_id}_{spk_name}']
+                for src_path, vits_in_file_id, vits_out_file_id in zip(src_path_list, vits_in_file_id_list, vits_out_file_id_list):
+                    if vits_in_file_id in proc_file_ids:
+                        continue  # already processed, duplicated task
+                    proc_file_ids.add(vits_in_file_id)
+                    assert src_path is not None
+                    # copy to "raw" dir in so-vits-svc
+                    new_src_path = os.path.join(config['vits']['src_dir'], 'raw', f'{vits_in_file_id}{ext}')
+                    shutil.copy(src_path, new_src_path)
+                    file_reg.register_file(vits_in_file_id, new_src_path, delete_after_finish=True)
+                    with watcher:
+                        vits_args = build_vits_args(config, ext, spk_name, new_src_path, profile_name=vits_profile)
+                        print(f'Running VITS with args: {vits_args}')
+                        proc = subprocess.Popen(vits_args, cwd=config['vits']['src_dir'])
+                        if proc.wait() != 0:
+                            raise RuntimeError(f'VITS exited with return code {proc.returncode}')
+                        new_file = check_diff_file(watcher.generate_diff_files()[0], ext)
+                        renamed_file = file_reg.register_tmp_file_in_work_dir(vits_out_file_id, ext)
+                        shutil.move(new_file, renamed_file)
 
 
 def down_mix(config: dict, file_reg: FileRegistration, ext: str):
     sp = config['down_mix']['separate_process']
     output_path = file_reg.get_file('output')
-    inst_file = file_reg.get_file(config['down_mix']['inst_id'])
-    inst_weight = config['down_mix']['inst_weight']
+    inst_file_weight = {file_reg.get_file(x['id']): x['weight'] for x in config['down_mix']['inst']}
     assert output_path is not None
     spk_channel_dict = {'L': {}, 'R': {}}
-    for spk_name, mix_cfg_list in config['down_mix']['spk_list'].items():
-        for mix_cfg in mix_cfg_list:
-            if sp:
-                channel = mix_cfg["channel"]
-                assert channel in {'L', 'R'}
-                vits_out_file_id = f'vits_out_{spk_name}#{channel}'
-                spk_channel_dict[channel][spk_name] = {'file': file_reg.get_file(vits_out_file_id),
-                                                       'weight': mix_cfg['weight'], 'delay': mix_cfg['delay']}
-            else:
-                vits_out_file_id = f'vits_out_{spk_name}'
-                obj ={'file': file_reg.get_file(vits_out_file_id), 'weight': mix_cfg['weight'],
-                      'delay': mix_cfg['delay']}
-                spk_channel_dict['L'][spk_name] = obj
-                spk_channel_dict['R'][spk_name] = obj
+    for vocal_proc_entry in config['down_mix']['vocal']:
+        input_id = vocal_proc_entry['id']
+        for spk_name, mix_cfg_list in vocal_proc_entry['spk_list'].items():
+            for mix_cfg in mix_cfg_list:
+                key_name = f'{input_id}_{spk_name}'
+                if sp:
+                    channel_list = mix_cfg["channel"]
+                    if isinstance(channel_list, str):
+                        channel_list = [channel_list]
+                    assert all(channel in {'L', 'R'} for channel in channel_list)
+                    for channel in channel_list:
+                        vits_out_file_id = f'vits_out_{input_id}_{spk_name}#{channel}'
+                        spk_channel_dict[channel][key_name] = {'file': file_reg.get_file(vits_out_file_id),
+                                                            'weight': mix_cfg['weight'], 'delay': mix_cfg['delay']}
+                else:
+                    vits_out_file_id = f'vits_out_{input_id}_{spk_name}'
+                    obj ={'file': file_reg.get_file(vits_out_file_id), 'weight': mix_cfg['weight'],
+                        'delay': mix_cfg['delay']}
+                    spk_channel_dict['L'][key_name] = obj
+                    spk_channel_dict['R'][key_name] = obj
     # ffmpeg note: stream labels in filter graph can be used only once
     # ffmpeg -y -i <input1> ... -i <inst_file> -filter_complex <filter_cmd> -map [ao] -ac 2 <extra_args> <output>
     ffmpeg_args = ['ffmpeg', '-y']
@@ -346,18 +361,31 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
             i += 1
             mix_weight.append(spk_data['weight'])
         n_nodes = len(merge_input_nodes)
-        # norm_volume_factor = round(VOLUME_MULTIPLIER / n_nodes, 2)
         # e.g., [a0][1]amerge=inputs=2,pan=mono|c0=0.5*c0+0.5*c1[vl]
         mix_channels = "+".join(f'{mix_weight[x]}*c{x}' for x in range(n_nodes))
         filter_cmd.append(f'{"".join(merge_input_nodes)}amerge=inputs={n_nodes},pan=mono|c0={mix_channels}[v{channel}]')
         channel_join_nodes.append(f'[v{channel}]')
     # join left and right vocal channel: vl, vr -> vo
     filter_cmd.append(f'{"".join(channel_join_nodes)}join=inputs=2:channel_layout=stereo[vo]')
-    inst_track_id = i
-    ffmpeg_args.extend(['-i', inst_file])
     # merge vocal and instrumental track
-    filter_cmd.append(f'[vo][{inst_track_id}]amerge=inputs=2,pan=stereo|c0=c0+{inst_weight}*c2|c1=c1+{inst_weight}*c3[ao]')
-    ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[ao]', '-ac', '2']
+    if len(inst_file_weight) > 0:
+        inst_track_id_list = []
+        inst_id_offset = i
+        inst_c0_mix_str_list = []
+        inst_c1_mix_str_list = []
+        for i, (inst_file_path, mix_weight) in enumerate(inst_file_weight.items()):
+            inst_track_id_list.append(f'[{i + inst_id_offset}]')
+            ffmpeg_args.extend(['-i', inst_file_path])
+            inst_c0_mix_str_list.append(f'{mix_weight}*c{(i+1)*2}')
+            inst_c1_mix_str_list.append(f'{mix_weight}*c{(i+1)*2+1}')
+        inst_track_id = ''.join(inst_track_id_list)
+        inst_c0_mix_str, inst_c1_mix_str = '+'.join(inst_c0_mix_str_list), '+'.join(inst_c1_mix_str_list)
+        filter_cmd.append(f'[vo]{inst_track_id}amerge=inputs={len(inst_file_weight)+1},'
+                          f'pan=stereo|c0=c0+{inst_c0_mix_str}|c1=c1+{inst_c1_mix_str}[ao]')
+        ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[ao]', '-ac', '2']
+    else:
+        # TODO: check empty inst track
+        ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[vo]', '-ac', '2']
     # extra arguments for output stream (s32 is required since s16 will overflow during mix)
     # -c:a pcm_s32le for wav
     # -c:a flac -sample_fmt s32 for flac
@@ -376,6 +404,7 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
     if proc.wait() != 0:
         raise RuntimeError(f'FFMpeg exited with return code {proc.returncode}')
 
+
 def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
     api_url = config['uvr']['api_url']
     if not api_url.endswith('/'):
@@ -390,14 +419,14 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
                 pipeline_list.pop(0)
                 break
             if len(pipeline['input_id']) != len(pipeline['output_id']):
-                raise RuntimeError(f'input_id[len={len(pipeline["input_id"])}] and output_id[len={len(pipeline["output_id"])}] length mismatch in config')
+                raise ValueError(f'input_id[len={len(pipeline["input_id"])}] and output_id[len={len(pipeline["output_id"])}] length mismatch in config')
             config_source = pipeline['config_source']
             if config_source == 'file':
                 uvr_config = uvr_config_cache.get_config(pipeline['config_file'])
             elif config_source == 'data':
                 uvr_config = pipeline['config_data']
             else:
-                raise RuntimeError(f'invalid config_source "{config_source}"')
+                raise ValueError(f'invalid config_source "{config_source}"')
             uvr_config['output_format'] = ext[1:].upper()
             should_pop_and_continue = True
             for input_id, output_id in zip(pipeline['input_id'], pipeline['output_id']):
@@ -419,43 +448,71 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
                     output_path = file_reg.register_tmp_file_in_work_dir(output_id, ext)
                 else:
                     output_path = {k: file_reg.register_tmp_file_in_work_dir(v, ext) for k, v in output_id.items()}
-                if not execute_uvr_task(config, input_path, output_path, uvr_config):
+                if not execute_uvr_task(config, input_path, output_path, uvr_config, file_reg.work_dir):
                     raise RuntimeError(f'Failed to execute UVR task: [input_path={input_path}] [output_path={output_path}]')
             if should_pop_and_continue:
                 pipeline_list.pop(0)
                 break
 
 
+def parse_dot_args_to_dict(d: Union[list, dict], key: str, value: str) -> bool:
+    key_split = key.split('.')
+    for sect in key_split[:-1]:
+        if len(sect) == 0:
+            continue
+        if isinstance(d, dict) and sect in d:
+            d = d[sect]
+        elif isinstance(d, list) and key.isdecimal() and 0 <= int(key) < len(d):
+            d = d[int(key)]
+        else:
+            return False
+    last_sect = key_split[-1]
+    if isinstance(d, dict):
+        d[last_sect] = value
+        return True
+    elif isinstance(d, list):
+        d[int(last_sect)] = value
+        return True
+    return False
+
+
 def main():
     AVAILABLE_EXT = {'.mp3', '.flac', '.wav'}
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', help='Config file for vits pipeline', default='vits_config.json')
+    parser.add_argument('-c', '--config', help='Config file for vits pipeline', default='vits_config.json', type=str)
+    parser.add_argument('-p', '--profile', default='default', help='VITS argument profile name', type=str)
+    parser.add_argument('-k', '--keep', help='Keep temporarily generated files', action='store_true')
     args, remains = parser.parse_known_args()
-    i = 0
-    cli_defined_files = {}
-    while i < len(remains):
-        if remains[i].startswith('--file.') and i + 1 < len(remains) and not remains[i + 1].startswith('--'):
-            cli_defined_files[remains[i][7:]] = remains[i+1]
-            i += 2
-        else:
-            i += 1
 
     with open(args.config, 'r', encoding='utf8') as f:
         config = json.load(f)
 
-    for key, value in cli_defined_files.items():
-        config['file'][key] = value
+    i = 0
+    while i < len(remains):
+        if remains[i].startswith('--') and i + 1 < len(remains) and not remains[i + 1].startswith('--'):
+            if not parse_dot_args_to_dict(config, remains[i][2:], remains[i + 1]):
+                raise ValueError(f'Failed to parse argument "{remains[i]}" with value "{remains[i + 1]}" to config')
+            i += 2
+        else:
+            i += 1
+
+    # append file name if file.output is a directory
     if 'output' in config['file'] and 'input' in config['file'] and os.path.isdir(config['file']['output']):
-        config['file']['output'] = os.path.join(config['file']['output'], os.path.basename(config['file']['input']))
+        output = os.path.join(config['file']['output'], os.path.basename(config['file']['input']))
+        output_base, output_ext = os.path.splitext(output)
+        # use .flac instead of .mp3 if output is specified as an existing directory when input is .mp3
+        if output_ext.lower() == '.mp3':
+            output = output_base + '.flac'
+        config['file']['output'] = output
 
     ext = config['sys']['intermediate_file_ext'].lower()
     final_ext = os.path.splitext(config['file']['output'])[1].lower()
     if final_ext == '':
-        raise RuntimeError('extension for output file is empty')
+        raise ValueError('extension for output file is empty')
     if final_ext not in AVAILABLE_EXT:
-        raise RuntimeError(f'unsupported extension "{final_ext}"')
+        raise ValueError(f'unsupported extension "{final_ext}"')
     if ext not in AVAILABLE_EXT:
-        raise RuntimeError(f'unsupported extension "{ext}"')
+        raise ValueError(f'unsupported extension "{ext}"')
 
     if config['ffmpeg']['ffmpeg_path'] is None:
         config['ffmpeg']['ffmpeg_path'] = shutil.which('ffmpeg')
@@ -466,7 +523,10 @@ def main():
     if config['ffmpeg']['ffprobe_path'] is None:
         raise RuntimeError('ffprobe not found')
 
-    file_reg = FileRegistration(config['sys']['work_dir'])
+    if args.profile not in config['vits']['profile']:
+        raise ValueError(f'Profile "{args.profile}" not found in vits.profile section')
+
+    file_reg = FileRegistration(config['sys']['work_dir'], args.keep)
     for file_id, path in config['file'].items():
         file_reg.register_file(file_id, path)
 
@@ -476,12 +536,13 @@ def main():
 
     # split vocal channels
     if config['down_mix']['separate_process']:
-        vocal_id = config['down_mix']['vocal_id']
-        if f'{vocal_id}#L' not in file_reg or f'{vocal_id}#R' not in file_reg:
-            split_audio_channel(config, vocal_id, file_reg, ext)
+        for vocal_entry in config['down_mix']['vocal']:
+            vocal_id = vocal_entry['id']
+            if f'{vocal_id}#L' not in file_reg or f'{vocal_id}#R' not in file_reg:
+                split_audio_channel(config, vocal_id, file_reg, ext)
 
     # run vits
-    execute_vits_task(config, file_reg, ext)
+    execute_vits_task(config, file_reg, ext, profile_name=args.profile)
     # mix final audio
     down_mix(config, file_reg, final_ext)
 

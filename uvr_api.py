@@ -100,7 +100,8 @@ class UVREnvRequest(IEnvAutomation):
     def __init__(self, process_method: Union[str, EProcessMethod],
                  model_name: Union[str, List[str]],
                  gpu_conversion: Optional[bool] = None,
-                 vocal_only: Optional[bool] = None, inst_only: Optional[bool] = None,
+                 vocal_only: Optional[bool] = None, inst_only: Optional[bool] = None,  # vocal/inst models
+                 no_echo_only: Optional[bool] = None, echo_only: Optional[bool] = None,  # de-echo models
                  sample_mode: bool = False,
                  output_format: Optional[Union[str, EOutputFormat]] = None) -> None:
         super().__init__()
@@ -111,6 +112,8 @@ class UVREnvRequest(IEnvAutomation):
         self.gpu_conversion = gpu_conversion
         self.vocal_only = vocal_only
         self.inst_only = inst_only
+        self.no_echo_only = no_echo_only
+        self.echo_only = echo_only
         self.sample_mode = sample_mode
         if output_format is not None and isinstance(output_format, str):
             output_format = EOutputFormat(output_format)
@@ -131,7 +134,8 @@ class UVREnvRequest(IEnvAutomation):
 
     def check_setup_prerequisite(self, uvr: 'MainWindowOverwrite') -> bool:
         return self.validate_model_name(uvr, self.model_name) and \
-            self._check_vocal_inst_opt_prerequisite(uvr, self.model_name)
+            self._check_vocal_inst_opt_prerequisite(uvr, self.model_name) and \
+            self._check_echo_opt_prerequisite(uvr, self.model_name)
 
     def validate_model_name(self, uvr: 'MainWindowOverwrite', model_names: Union[str, List[str]]) -> bool:
         process_method = self.process_method
@@ -162,10 +166,21 @@ class UVREnvRequest(IEnvAutomation):
             elif primary_stem == constants.INST_STEM:
                 vocal_only_opt = uvr.is_secondary_stem_only_var
                 inst_only_opt = uvr.is_primary_stem_only_var
-            if self.vocal_only is not None and self.vocal_only != vocal_only_opt.get():
-                vocal_only_opt.set(self.vocal_only)
-            if self.inst_only is not None and self.inst_only != inst_only_opt.get():
-                inst_only_opt.set(self.inst_only)
+            _perform_tk_value_set(self.vocal_only, vocal_only_opt)
+            _perform_tk_value_set(self.inst_only, inst_only_opt)
+        if self.no_echo_only is not None or self.echo_only is not None:
+            model_data = uvr.assemble_model_data(model_name, self.process_method.value)[0]
+            primary_stem = model_data.primary_stem
+            print(f'primary stem: {primary_stem}')
+            no_echo_opt = echo_opt = None
+            if primary_stem == 'No Echo':
+                no_echo_opt = uvr.is_primary_stem_only_var
+                echo_opt = uvr.is_secondary_stem_only_var
+            elif primary_stem == 'Echo':
+                echo_opt = uvr.is_secondary_stem_only_var
+                no_echo_opt = uvr.is_primary_stem_only_var
+            _perform_tk_value_set(self.no_echo_only, no_echo_opt)
+            _perform_tk_value_set(self.echo_only, echo_opt)
 
     def _check_vocal_inst_opt_prerequisite(self, uvr: 'MainWindowOverwrite', model_name: str) -> bool:
         if self.vocal_only is None and self.inst_only is None:
@@ -177,6 +192,17 @@ class UVREnvRequest(IEnvAutomation):
         if primary_stem == constants.VOCAL_STEM or primary_stem == constants.INST_STEM:
             return True
         return _record_last_check_failed_source('Could not set vocal_only or inst_only: no matching stems from model')
+
+    def _check_echo_opt_prerequisite(self, uvr: 'MainWindowOverwrite', model_name: str) -> bool:
+        if self.echo_only is None and self.no_echo_only is None:
+            return True
+        model_data = uvr.assemble_model_data(model_name, self.process_method.value)[0]
+        if not model_data.model_status:
+            return _record_last_check_failed_source('Invalid model name')
+        primary_stem = model_data.primary_stem
+        if primary_stem in {'No Echo', 'Echo'}:
+            return True
+        return _record_last_check_failed_source('Could not set no_echo_only or echo_only: no matching stems from model')
 
 
 class SecondaryModelOption(IEnvAutomation):
@@ -255,12 +281,14 @@ class VRArchRequest(UVREnvRequest):
     def __init__(self, model_name: str, window_size: Optional[int] = None, aggression_setting: Optional[int] = None,
                  # common option
                  gpu_conversion: Optional[bool] = None, vocal_only: Optional[bool] = None,
-                 inst_only: Optional[bool] = None, sample_mode: Optional[bool] = None,
+                 inst_only: Optional[bool] = None, 
+                 no_echo_only: Optional[bool] = None, echo_only: Optional[bool] = None,  # de-echo models
+                 sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[VRArchAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
-        super().__init__(EProcessMethod.VR_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
-                         output_format)
+        super().__init__(EProcessMethod.VR_MODE, model_name, gpu_conversion, vocal_only, inst_only, no_echo_only,
+                         echo_only, sample_mode, output_format)
         self.window_size = window_size
         self.aggression_setting = aggression_setting
         self.advanced_option = advanced_option
@@ -277,6 +305,7 @@ class VRArchRequest(UVREnvRequest):
 
     def _select_model(self, uvr: 'MainWindowOverwrite') -> None:
         uvr.vr_model_var.set(self.model_name)
+        uvr.selection_action_models(self.model_name)
 
     def setup(self, uvr: 'MainWindowOverwrite') -> None:
         super().setup(uvr)
@@ -339,8 +368,8 @@ class MDXNetArchRequest(UVREnvRequest):
                  advanced_option: Optional[MDXNetArchAdvancedOption] = None,
                  mdxnet23_advanced_option: Optional[MDXNet23ArchOnlyAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
-        super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
-                         output_format)
+        super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, None, None,
+                         sample_mode, output_format)
         self.segment_size = segment_size
         self.overlap = overlap
         self.advanced_option = advanced_option
@@ -410,7 +439,8 @@ class DemucsArchRequest(UVREnvRequest):
                  advanced_option: Optional[DemucsArchAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
         # TODO: pre-process model
-        super().__init__(EProcessMethod.DEMUCS_MODE, model_name, gpu_conversion, None, None, sample_mode, output_format)
+        super().__init__(EProcessMethod.DEMUCS_MODE, model_name, gpu_conversion, None, None, None, None, sample_mode,
+                         output_format)
         self.stem = stem
         self.primary_stem_only = primary_stem_only
         self.secondary_stem_only = secondary_stem_only
@@ -474,7 +504,7 @@ class EnsembleModeRequest(UVREnvRequest):
                  secondary_stem_only: Optional[bool] = None, gpu_conversion: Optional[bool] = None,
                  sample_mode: Optional[bool] = None, output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[EnsembleModeAdvancedOption] = None) -> None:
-        super().__init__(EProcessMethod.ENSEMBLE_MODE, model_name, gpu_conversion, None, None, sample_mode,
+        super().__init__(EProcessMethod.ENSEMBLE_MODE, model_name, gpu_conversion, None, None, None, None, sample_mode,
                          output_format)
         self.stem_pair = stem_pair
         self.ensemble_algorithm = ensemble_algorithm

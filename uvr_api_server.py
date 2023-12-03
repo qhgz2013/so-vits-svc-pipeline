@@ -37,7 +37,7 @@ import traceback
 
 app = Flask(__name__)
 FINAL_OUTPUT_TYPE = Optional[Union[Dict[str, str], str]]
-stem_ptn = re.compile(r'^(.+)_\((\w+)\)(\.\w+)$')
+stem_ptn = re.compile(r'^(.+)_\(([\w\s]+)\)(\.\w+)$')
 # cspell:disable-next-line
 temp_ensemble_dirname = re.compile(r'^Ensembled_Outputs_\d+$')
 _default = object()

@@ -32,7 +32,8 @@ class UVREnvRequest(UVRRequestObject):
     def __init__(self, process_method: Union[str, EProcessMethod],
                  model_name: Union[str, List[str]],
                  gpu_conversion: Optional[bool] = None,
-                 vocal_only: Optional[bool] = None, inst_only: Optional[bool] = None,
+                 vocal_only: Optional[bool] = None, inst_only: Optional[bool] = None,  # vocal/inst models
+                 no_echo_only: Optional[bool] = None, echo_only: Optional[bool] = None,  # de-echo models
                  sample_mode: bool = False,
                  output_format: Optional[Union[str, EOutputFormat]] = None) -> None:
         super().__init__()
@@ -43,6 +44,8 @@ class UVREnvRequest(UVRRequestObject):
         self.gpu_conversion = gpu_conversion
         self.vocal_only = vocal_only
         self.inst_only = inst_only
+        self.no_echo_only = no_echo_only
+        self.echo_only = echo_only
         self.sample_mode = sample_mode
         if output_format is not None and isinstance(output_format, str):
             output_format = EOutputFormat(output_format)
@@ -79,18 +82,20 @@ class VRArchAdvancedOption(UVRRequestObject):
 
 class VRArchRequest(UVREnvRequest):
     def __init__(self, model_name: str, window_size: Optional[int] = None, aggression_setting: Optional[int] = None,
+                 # common option
                  gpu_conversion: Optional[bool] = None, vocal_only: Optional[bool] = None,
-                 inst_only: Optional[bool] = None, sample_mode: Optional[bool] = None,
+                 inst_only: Optional[bool] = None, 
+                 no_echo_only: Optional[bool] = None, echo_only: Optional[bool] = None,  # de-echo models
+                 sample_mode: Optional[bool] = None,
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[VRArchAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
-        super().__init__(EProcessMethod.VR_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
-                         output_format)
+        super().__init__(EProcessMethod.VR_MODE, model_name, gpu_conversion, vocal_only, inst_only, no_echo_only,
+                         echo_only, sample_mode, output_format)
         self.window_size = window_size
         self.aggression_setting = aggression_setting
         self.advanced_option = advanced_option
         self.secondary_model_option = secondary_model_option
-
 
 class MDXNetArchAdvancedOption(UVRRequestObject):
     def __init__(self, volume_compensation: Optional[Union[str, float]] = None,
@@ -123,8 +128,8 @@ class MDXNetArchRequest(UVREnvRequest):
                  advanced_option: Optional[MDXNetArchAdvancedOption] = None,
                  mdxnet23_advanced_option: Optional[MDXNet23ArchOnlyAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
-        super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, sample_mode,
-                         output_format)
+        super().__init__(EProcessMethod.MDX_MODE, model_name, gpu_conversion, vocal_only, inst_only, None, None,
+                         sample_mode, output_format)
         self.segment_size = segment_size
         self.overlap = overlap
         self.advanced_option = advanced_option
@@ -152,7 +157,8 @@ class DemucsArchRequest(UVREnvRequest):
                  output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[DemucsArchAdvancedOption] = None,
                  secondary_model_option: Optional[SecondaryModelOption] = None) -> None:
-        super().__init__(EProcessMethod.DEMUCS_MODE, model_name, gpu_conversion, None, None, sample_mode, output_format)
+        super().__init__(EProcessMethod.DEMUCS_MODE, model_name, gpu_conversion, None, None, None, None, sample_mode,
+                         output_format)
         self.stem = stem
         self.primary_stem_only = primary_stem_only
         self.secondary_stem_only = secondary_stem_only
@@ -174,7 +180,7 @@ class EnsembleModeRequest(UVREnvRequest):
                  secondary_stem_only: Optional[bool] = None, gpu_conversion: Optional[bool] = None,
                  sample_mode: Optional[bool] = None, output_format: Optional[EOutputFormat] = None,
                  advanced_option: Optional[EnsembleModeAdvancedOption] = None) -> None:
-        super().__init__(EProcessMethod.ENSEMBLE_MODE, model_name, gpu_conversion, None, None, sample_mode,
+        super().__init__(EProcessMethod.ENSEMBLE_MODE, model_name, gpu_conversion, None, None, None, None, sample_mode,
                          output_format)
         self.stem_pair = stem_pair
         self.ensemble_algorithm = ensemble_algorithm

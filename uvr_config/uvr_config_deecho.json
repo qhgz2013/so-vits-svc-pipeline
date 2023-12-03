@@ -1,9 +1,9 @@
 {
     "process_method": "VR Architecture",
-    "model_name": "UVR-BVE-4B_SN-44100-1",
+    "model_name": "UVR-De-Echo-Normal",
     "gpu_conversion": true,
-    "vocal_only": false,
-    "inst_only": false,
+    "no_echo_only": true,
+    "echo_only": false,
     "sample_mode": false,
     "advanced_option": {
         "enable_tta": true,

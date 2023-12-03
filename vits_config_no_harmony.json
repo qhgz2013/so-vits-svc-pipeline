@@ -100,7 +100,7 @@
     "separate_process": true,
     "vocal": [
       {
-        "id": "vocal_remove_harmony",
+        "id": "vocal_de_echo",
         "spk_list": {
           "banbenzhenling": [
             {
@@ -142,12 +142,17 @@
         "input_id": ["vocal"],
         "output_id": [
           {
-            "Vocals": "vocal_harmony",
             "Instrumental": "vocal_remove_harmony"
           }
         ],
         "config_source": "file",
         "config_file": "uvr_config/uvr_config_harmony.json"
+      },
+      {
+        "input_id": ["vocal_remove_harmony"],
+        "output_id": ["vocal_de_echo"],
+        "config_source": "file",
+        "config_file": "uvr_config/uvr_config_deecho.json"
       }
     ]
   }

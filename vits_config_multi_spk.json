@@ -100,13 +100,53 @@
     "separate_process": true,
     "vocal": [
       {
-        "id": "vocal_remove_harmony",
+        "id": "vocal_de_echo",
         "spk_list": {
-          "banbenzhenling": [
+          "nengdengmameizi": [
             {
-              "channel": ["L", "R"],
+              "channel": "L",
               "weight": 1,
               "delay": 0
+            }
+          ],
+          "chuanchenglingzi": [
+            {
+              "channel": "R",
+              "weight": 0.4,
+              "delay": 0
+            }
+          ],
+          "banbenzhenling": [
+            {
+              "channel": "R",
+              "weight": 0.8,
+              "delay": 20
+            }
+          ]
+        }
+      },
+      {
+        "id": "vocal_harmony",
+        "spk_list": {
+          "nengdengmameizi": [
+            {
+              "channel": "L",
+              "weight": 1,
+              "delay": 0
+            }
+          ],
+          "chuanchenglingzi": [
+            {
+              "channel": "R",
+              "weight": 0.4,
+              "delay": 0
+            }
+          ],
+          "banbenzhenling": [
+            {
+              "channel": "R",
+              "weight": 0.8,
+              "delay": 20
             }
           ]
         }
@@ -148,6 +188,12 @@
         ],
         "config_source": "file",
         "config_file": "uvr_config/uvr_config_harmony.json"
+      },
+      {
+        "input_id": ["vocal_remove_harmony"],
+        "output_id": ["vocal_de_echo"],
+        "config_source": "file",
+        "config_file": "uvr_config/uvr_config_deecho.json"
       }
     ]
   }
