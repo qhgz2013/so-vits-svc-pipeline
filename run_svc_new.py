@@ -394,7 +394,7 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str, metadata: Optio
         tags = {k.lower(): v for k, v in tags.items()}
         ffmpeg_tag_args = ['-id3v2_version', '4']  # use v2.4
         cfg_dump = json.dumps(config, separators=(',', ':'))
-        ffmpeg_tag_args.extend(['-metadata', f'comment=Created by UVR pipeline {cfg_dump}'])
+        ffmpeg_tag_args.extend(['-metadata', f'comment=Created by SO-VITS-SVC pipeline {cfg_dump}'])
         candidate_keys = {'title', 'album', 'artist', 'track'}
         for key in candidate_keys:
             if key in tags:
