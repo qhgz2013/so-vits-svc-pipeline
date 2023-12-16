@@ -57,17 +57,17 @@ Arguments for this pipeline:
 There are 3 preset config files provided in this repository, the corresponding process pipeline are also attached:
 
 1. `vits_config.json` (default)
-  - just separate vocal-instrumental tracks and remove harmony for the vocal track
-  - relatively fast and can provide acceptable quality
-  - ![](images/default.png)
+   - just separate vocal-instrumental tracks and remove harmony for the vocal track
+   - relatively fast and can provide acceptable quality
+   - ![](images/default.png)
 2. `vits_config_with_harmony.json`
-  - reserve harmony track and run VITS separately for the harmony track
-  - slower and the F0 prediction for harmony track may fail commonly
-  - ![](images/with_harmony.png)
+   - reserve harmony track and run VITS separately for the harmony track
+   - slower and the F0 prediction for harmony track may fail commonly
+   - ![](images/with_harmony.png)
 3. `vits_config_multi_spk.json` (experimental)
-  - for multi-speaker VITS models only
-  - 1 speaker per channel is recommended (one for L channel and another for R channel)
-  - ![](images/multi_speaker.png)
+   - for multi-speaker VITS models only
+   - 1 speaker per channel is recommended (one for L channel and another for R channel)
+   - ![](images/multi_speaker.png)
 
 
 [UltimateVocalRemoverGUI]: https://github.com/Anjok07/ultimatevocalremovergui#manual-windows-installation
