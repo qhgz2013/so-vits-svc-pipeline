@@ -21,11 +21,15 @@ pip install -r requirements.txt
 
 After installation, run UVR GUI and download required models (optional) via: `python UVR.py`
 
-**Note2**: The root path of UVR GUI is denoted as `uvr_path`.
+**Note**: The root path of UVR GUI is denoted as `uvr_path`.
 
 ### 1.2 FFMpeg
 
-Download and extract [FFMpeg], then add the executable files into `PATH` environment. Check this step by opening a terminal (`cmd`) and type `ffmpeg -version`.
+1. Download and extract [FFMpeg] (both ffmpeg and ffprobe are required)
+2. Two choices:
+   - Add the executable files into `PATH` environment, this script will detect them automatically. Check this step by opening a terminal (`cmd`) and type `ffmpeg -version`
+   - Specify the path of `ffmpeg` and `ffprobe` in the `ffmpeg` section of the config json manually, or pass by argument `--ffmpeg.ffmpeg_path <ffmpeg_executable> --ffmpeg.ffprobe_path <ffprobe_executable>`
+
 
 ### 1.3 So-VITS-SVC 4.1
 
@@ -45,16 +49,26 @@ This time, UVR GUI is able to accept tasks through HTTP protocol (listening on p
 
 To run So-VITS-SVC pipeline, ensure `run_svc_new.py` and `uvr_api_client.py` are in the same directory first, then run `python run_svc_new.py [-c vits_config.json] [-p default] [-k]` to perform end-to-end automation.
 
-### 2.3 Dive into high-quality pipeline
+Arguments for this pipeline:
+- `-c` or `--config`: config file for SO-VITS-SVC pipeline, default: `vits_config.json`
+- `-p` or `--profile`: SO-VITS-SVC inference arguments (defined in the `vits` section of the config file), default: `default`
+- `-k` or `--keep`: keep intermediate files during this pipeline (these files will be cleaned up after finish)
 
-This section will be done in future.
+There are 3 preset config files provided in this repository, the corresponding process pipeline are also attached:
 
-## 3. Roadmap
+1. `vits_config.json` (default)
+  - just separate vocal-instrumental tracks and remove harmony for the vocal track
+  - relatively fast and can provide acceptable quality
+  - ![](images/default.png)
+2. `vits_config_with_harmony.json`
+  - reserve harmony track and run VITS separately for the harmony track
+  - slower and the F0 prediction for harmony track may fail commonly
+  - ![](images/with_harmony.png)
+3. `vits_config_multi_spk.json` (experimental)
+  - for multi-speaker VITS models only
+  - 1 speaker per channel is recommended (one for L channel and another for R channel)
+  - ![](images/multi_speaker.png)
 
-- [x] Add `--separate_process`.
-- [x] Refactor UVR-http-service to provide per-task UVR environment setup.
-- [x] Use different configs to obtain high-quality vocal and instrumental stems separately. (reuse `-uc` by specifying vocal only and inst only environments, refers to `uvr_config_sep_sample.json` for detail)
-- [ ] Customize volume mix factor for multiple speakers (by argument `-s spk1*<factor1>+spk2*<factor2>`).
 
 [UltimateVocalRemoverGUI]: https://github.com/Anjok07/ultimatevocalremovergui#manual-windows-installation
 [So-VITS-SVC 4.1]: https://www.yuque.com/umoubuton/ueupp5/sdahi7m5m6r0ur1r
