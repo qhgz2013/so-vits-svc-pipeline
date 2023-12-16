@@ -293,7 +293,7 @@ def execute_vits_task(config: dict, file_reg: FileRegistration, ext: str, profil
                         shutil.move(new_file, renamed_file)
 
 
-def down_mix(config: dict, file_reg: FileRegistration, ext: str):
+def down_mix(config: dict, file_reg: FileRegistration, ext: str, metadata: Optional[dict] = None):
     sp = config['down_mix']['separate_process']
     output_path = file_reg.get_file('output')
     inst_file_weight = {file_reg.get_file(x['id']): x['weight'] for x in config['down_mix']['inst']}
@@ -312,11 +312,11 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
                     for channel in channel_list:
                         vits_out_file_id = f'vits_out_{input_id}_{spk_name}#{channel}'
                         spk_channel_dict[channel][key_name] = {'file': file_reg.get_file(vits_out_file_id),
-                                                            'weight': mix_cfg['weight'], 'delay': mix_cfg['delay']}
+                                                               'weight': mix_cfg['weight'], 'delay': mix_cfg['delay']}
                 else:
                     vits_out_file_id = f'vits_out_{input_id}_{spk_name}'
-                    obj ={'file': file_reg.get_file(vits_out_file_id), 'weight': mix_cfg['weight'],
-                        'delay': mix_cfg['delay']}
+                    obj = {'file': file_reg.get_file(vits_out_file_id), 'weight': mix_cfg['weight'],
+                           'delay': mix_cfg['delay']}
                     spk_channel_dict['L'][key_name] = obj
                     spk_channel_dict['R'][key_name] = obj
     # ffmpeg note: stream labels in filter graph can be used only once
@@ -335,14 +335,7 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
             delay = spk_data['delay']
             if delay > 0:
                 # for adelay filter, ffmpeg need to specify aformat at first, otherwise amerge will throw a format error
-                probe_args = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams',
-                              spk_data['file']]
-                print(f'Running ffprobe with args: {probe_args}')
-                proc = subprocess.Popen(probe_args, stdout=subprocess.PIPE)
-                output = proc.communicate()[0].decode()
-                if proc.wait() != 0:
-                    raise RuntimeError(f'FFMpeg exited with return code {proc.returncode}')
-                fmt_json = json.loads(output)
+                fmt_json = get_metadata(config, spk_data['file'])
                 sample_fmt = fmt_json['streams'][0]['sample_fmt']
                 sample_rate = fmt_json['streams'][0]['sample_rate']
                 channels = fmt_json['streams'][0].get('channels', None)
@@ -353,7 +346,8 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
                 if channels == 1 and not sample_fmt.endswith('p'):
                     sample_fmt += 'p'  # a buggy fix for s16 -> s16p in mono stream?
                 layout = channel_cnt_layout_mapper[channels]
-                filter_cmd.append(f'[{i}]aformat=sample_fmts={sample_fmt}:sample_rates={sample_rate}:channel_layouts={layout}[s{i}]')
+                filter_cmd.append(f'[{i}]aformat=sample_fmts={sample_fmt}:'
+                                  f'sample_rates={sample_rate}:channel_layouts={layout}[s{i}]')
                 filter_cmd.append(f'[s{i}]adelay={delay}[t{i}]')
                 merge_input_nodes.append(f'[t{i}]')
             else:
@@ -382,10 +376,31 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str):
         inst_c0_mix_str, inst_c1_mix_str = '+'.join(inst_c0_mix_str_list), '+'.join(inst_c1_mix_str_list)
         filter_cmd.append(f'[vo]{inst_track_id}amerge=inputs={len(inst_file_weight)+1},'
                           f'pan=stereo|c0=c0+{inst_c0_mix_str}|c1=c1+{inst_c1_mix_str}[ao]')
-        ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[ao]', '-ac', '2']
-    else:
-        # TODO: check empty inst track
-        ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[vo]', '-ac', '2']
+
+    # add cover if exist
+    cover_id_offset = -1
+    if 'input_cover' in file_reg:
+        cover_file = file_reg.get_file('input_cover')
+        if os.path.isfile(cover_file):
+            ffmpeg_args.extend(['-i', cover_file])
+            cover_id_offset = inst_id_offset + len(inst_file_weight)
+    ffmpeg_args += ['-filter_complex', ';'.join(filter_cmd), '-map', '[ao]' if len(inst_file_weight) > 0 else '[vo]', '-ac', '2']
+
+    if cover_id_offset != -1:
+        ffmpeg_args += ['-map', f'{cover_id_offset}:0', '-disposition:v', 'attached_pic']
+    # metadata
+    if metadata is not None and 'tags' in metadata.get('format', {}):
+        tags = metadata['format']['tags']
+        tags = {k.lower(): v for k, v in tags.items()}
+        ffmpeg_tag_args = ['-id3v2_version', '4']  # use v2.4
+        cfg_dump = json.dumps(config, separators=(',', ':'))
+        ffmpeg_tag_args.extend(['-metadata', f'comment=Created by UVR pipeline {cfg_dump}'])
+        candidate_keys = {'title', 'album', 'artist', 'track'}
+        for key in candidate_keys:
+            if key in tags:
+                ffmpeg_tag_args.append('-metadata')
+                ffmpeg_tag_args.append(f'{key}={tags[key]}')
+        ffmpeg_args.extend(ffmpeg_tag_args)
     # extra arguments for output stream (s32 is required since s16 will overflow during mix)
     # -c:a pcm_s32le for wav
     # -c:a flac -sample_fmt s32 for flac
@@ -409,7 +424,7 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
     api_url = config['uvr']['api_url']
     if not api_url.endswith('/'):
         api_url = api_url + '/'
-    pipeline_list = config['uvr']['pipeline']  # type: list
+    pipeline_list = config['uvr']['pipeline'].copy()  # type: list
     uvr_config_cache = ConfigCache()
     while len(pipeline_list) > 0:
         for pipeline in pipeline_list:
@@ -476,6 +491,36 @@ def parse_dot_args_to_dict(d: Union[list, dict], key: str, value: str) -> bool:
     return False
 
 
+def get_metadata(config: dict, path: str) -> Dict[str, Any]:
+    ffprobe = config['ffmpeg']['ffprobe_path']
+    probe_args = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', path]
+    print(f'Running ffprobe with args: {probe_args}')
+    proc = subprocess.Popen(probe_args, stdout=subprocess.PIPE)
+    output = proc.communicate()[0].decode()
+    if proc.wait() != 0:
+        raise RuntimeError(f'FFMpeg exited with return code {proc.returncode}')
+    fmt_json = json.loads(output)
+    return fmt_json
+
+
+def extract_cover(config: dict, audio_file: str, output_cover_file: str, audio_metadata: Optional[dict] = None) -> bool:
+    if audio_metadata is None:
+        audio_metadata = get_metadata(audio_file)
+    streams = audio_metadata['streams']
+    video_streams = [stream for stream in streams if stream['codec_type'] == 'video']
+    if len(video_streams) == 0:
+        return False
+    if len(video_streams) > 1:
+        print('Multiple cover found in audio file, use the first one')
+    ffmpeg = config['ffmpeg']['ffmpeg_path']
+    ffmpeg_args = [ffmpeg, '-i', audio_file, '-an', '-vcodec', 'copy', output_cover_file]
+    print(f'Running ffmpeg with args: {ffmpeg_args}')
+    proc = subprocess.Popen(ffmpeg_args)
+    if proc.wait() != 0:
+        raise RuntimeError(f'FFMpeg exited with return code {proc.returncode}')
+    return True
+
+
 def main():
     AVAILABLE_EXT = {'.mp3', '.flac', '.wav'}
     parser = argparse.ArgumentParser()
@@ -530,6 +575,13 @@ def main():
     for file_id, path in config['file'].items():
         file_reg.register_file(file_id, path)
 
+    # process input metadata
+    input_metadata = None
+    if 'input' in file_reg:
+        input_metadata = get_metadata(config, file_reg.get_file('input'))
+        cover_path = file_reg.register_tmp_file_in_work_dir('input_cover', '.jpg')
+        extract_cover(config, file_reg.get_file('input'), cover_path, input_metadata)
+
     # execute UVR tasks
     if config['uvr']['enable']:
         execute_uvr_pipeline(config, file_reg, ext)
@@ -544,7 +596,7 @@ def main():
     # run vits
     execute_vits_task(config, file_reg, ext, profile_name=args.profile)
     # mix final audio
-    down_mix(config, file_reg, final_ext)
+    down_mix(config, file_reg, final_ext, input_metadata)
 
 
 if __name__ == '__main__':
