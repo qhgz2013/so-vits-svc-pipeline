@@ -5,7 +5,8 @@
   }
   "sys": {
     "work_dir": string, // temp directory for saving on-the-fly audio files
-    "intermediate_file_ext": string // fix to ".wav" since vits will always convert others to wav
+    "intermediate_file_ext": string, // fix to ".wav" since vits will always convert others to wav,
+    "mp3_output_bitrate": int // bitrate (k-bit) for mp3 output
   },
   "vits": {
     "src_dir": string, // path to so-vits-svc source

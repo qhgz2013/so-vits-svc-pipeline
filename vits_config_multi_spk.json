@@ -5,7 +5,8 @@
   },
   "sys": {
     "work_dir": "Z:/vits_pipeline_workdir",
-    "intermediate_file_ext": ".wav"
+    "intermediate_file_ext": ".wav",
+    "mp3_output_bitrate": 320
   },
   "vits": {
     "src_dir": "F:/so-vits-svc_2.3.15",

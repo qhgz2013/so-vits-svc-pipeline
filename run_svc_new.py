@@ -410,7 +410,8 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str, metadata: Optio
     elif ext == '.flac':
         ffmpeg_args += ['-c:a', 'flac', '-sample_fmt', 's32']
     elif ext == '.mp3':
-        ffmpeg_args += ['-c:a', 'libmp3lame', '-sample_fmt', 's32p', '-b:a', '320k']
+        bitrate = config['sys'].get('mp3_output_bitrate', 320)
+        ffmpeg_args += ['-c:a', 'libmp3lame', '-sample_fmt', 's32p', '-b:a', f'{bitrate}k']
     else:
         print(f'No available extra arguments for wav format "{ext}"')
     ffmpeg_args.append(output_path)
@@ -470,23 +471,39 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
                 break
 
 
+def _convert_type(obj: Union[dict, list], key: Union[int, str], value: str) -> None:
+    if obj[key] is None:
+        obj[key] = value
+        return
+    value_type = type(obj[key])
+    if value_type != type(value):
+        obj[key] = value_type(value)
+    else:
+        obj[key] = value
+
+
 def parse_dot_args_to_dict(d: Union[list, dict], key: str, value: str) -> bool:
     key_split = key.split('.')
     for sect in key_split[:-1]:
         if len(sect) == 0:
             continue
-        if isinstance(d, dict) and sect in d:
+        if isinstance(d, dict):
+            if sect not in d:
+                d[sect] = {}
             d = d[sect]
-        elif isinstance(d, list) and key.isdecimal() and 0 <= int(key) < len(d):
-            d = d[int(key)]
+        elif isinstance(d, list) and key.isdecimal():
+            int_key = int(key)
+            if int_key >= 0 and int_key >= len(d):
+                d.extend([None] * (int_key - len(d) + 1))
+            d = d[int_key]
         else:
             return False
     last_sect = key_split[-1]
     if isinstance(d, dict):
-        d[last_sect] = value
+        _convert_type(d, last_sect, value)
         return True
     elif isinstance(d, list):
-        d[int(last_sect)] = value
+        _convert_type(d, int(last_sect), value)
         return True
     return False
 
@@ -561,12 +578,12 @@ def main():
 
     if config['ffmpeg']['ffmpeg_path'] is None:
         config['ffmpeg']['ffmpeg_path'] = shutil.which('ffmpeg')
-    if config['ffmpeg']['ffmpeg_path'] is None:
-        raise RuntimeError('ffmpeg not found')
+        if config['ffmpeg']['ffmpeg_path'] is None:
+            raise RuntimeError('ffmpeg not found')
     if config['ffmpeg']['ffprobe_path'] is None:
         config['ffmpeg']['ffprobe_path'] = shutil.which('ffprobe')
-    if config['ffmpeg']['ffprobe_path'] is None:
-        raise RuntimeError('ffprobe not found')
+        if config['ffmpeg']['ffprobe_path'] is None:
+            raise RuntimeError('ffprobe not found')
 
     if args.profile not in config['vits']['profile']:
         raise ValueError(f'Profile "{args.profile}" not found in vits.profile section')

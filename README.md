@@ -54,6 +54,8 @@ Arguments for this pipeline:
 - `-p` or `--profile`: SO-VITS-SVC inference arguments (defined in the `vits` section of the config file), default: `default`
 - `-k` or `--keep`: keep intermediate files during this pipeline (these files will be cleaned up after finish)
 
+Other arguments will be set into config json, for example: `--file.input <input_file> --file.output <output_file_or_dir>` will overwrite the input file and output file in the config json
+
 There are 3 preset config files provided in this repository, the corresponding process pipeline are also attached:
 
 1. `vits_config.json` (default)
@@ -62,7 +64,8 @@ There are 3 preset config files provided in this repository, the corresponding p
    - ![](images/default.png)
 2. `vits_config_with_harmony.json`
    - reserve harmony track and run VITS separately for the harmony track
-   - slower and the F0 prediction for harmony track may fail commonly
+   - slower and the F0 prediction for harmony track may fail quite often
+   - can produce better quality for the songs with simple harmony
    - ![](images/with_harmony.png)
 3. `vits_config_multi_spk.json` (experimental)
    - for multi-speaker VITS models only
