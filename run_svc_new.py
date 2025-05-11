@@ -2,20 +2,18 @@
 # rev 7: code refactor
 import argparse
 import os
-from glob import glob
 import subprocess
 import shutil
-from itertools import chain
 from time import sleep, time
 import json
-from typing import *
+from typing import Any, Optional, List, Union, Dict, overload, Tuple, TYPE_CHECKING
 import uvr_api_client as api
 import requests
 import threading
 from warnings import warn
+from copy import deepcopy
 
-
-# cspell:ignore vits,adelay,flac,amerge,channelsplit,getpid,ffprobe,aformat,workenv,libmp
+# cspell:ignore vits,adelay,flac,amerge,channelsplit,getpid,ffprobe,aformat,workenv,libmp,vcodec
 
 def build_vits_args(config, ext: str, spk_name: str, input_file: str, profile_name: str = 'default') -> List[str]:
     vits_cfg = config['vits']['profile'][profile_name]
@@ -127,7 +125,7 @@ def split_audio_channel(config: dict, file_id: str, file_reg: FileRegistration, 
         ext = os.path.splitext(file_in)[1]
     file_out_l = file_reg.register_tmp_file_in_work_dir(file_id + '#L', ext)
     file_out_r = file_reg.register_tmp_file_in_work_dir(file_id + '#R', ext)
-    ffmpeg_args = [config['ffmpeg']['ffmpeg_path'], '-y', '-i', file_in,
+    ffmpeg_args = [config['ffmpeg']['ffmpeg_path'], '-v', 'quiet', '-y', '-i', file_in,
                    '-filter_complex', '[0]channelsplit=channel_layout=stereo[l][r]',
                    '-map', '[l]', file_out_l, '-map', '[r]', file_out_r]
     print(f'Running FFMpeg with args: {ffmpeg_args}')
@@ -169,6 +167,8 @@ def execute_uvr_task(config: dict, input_file: str, output_file: Union[str, Dict
             log_idx = len(task.task_log)
     print('')
     if task.task_state == api.UVRCallState.SUCCESS:
+        if task.final_output_file is None:
+            raise ValueError('UVR task returned a none output file list')
         if isinstance(output_file, str):
             final_file = next(iter(task.final_output_file.values()))
             if final_file != output_file:
@@ -182,6 +182,7 @@ def execute_uvr_task(config: dict, input_file: str, output_file: Union[str, Dict
                 if final_file != output_file[stem]:
                     shutil.move(final_file, output_file[stem])
         return True
+    return False
 
 
 class FileChangeWatcher:
@@ -240,13 +241,26 @@ class FileChangeWatcher:
         return diff_files, diff_dirs
 
 
-def check_diff_file(new_files: List[str], ext) -> str:
+def check_diff_file(new_files: List[str], ext: str) -> str:
     new_sounds = list(filter(lambda x: x.endswith(ext), new_files))
     if len(new_sounds) > 1:
         raise RuntimeError('Found multiple sounds updated during inference')
     elif len(new_sounds) == 0:
         raise RuntimeError('No sound file changed in VITS result directory')
     return new_sounds[0]
+
+
+def _get_spk_list(src: Union[list, dict]) -> dict:
+    if isinstance(src, dict):
+        return src
+    ret = {}
+    src = deepcopy(src)
+    for entry in src:
+        spk_name = entry.pop('spk_name')
+        if spk_name not in ret:
+            ret[spk_name] = []
+        ret[spk_name].append(entry)
+    return ret
 
 
 def execute_vits_task(config: dict, file_reg: FileRegistration, ext: str, profile_name: str = 'default'):
@@ -259,7 +273,7 @@ def execute_vits_task(config: dict, file_reg: FileRegistration, ext: str, profil
         proc_file_ids = set()
         vits_output_dir = os.path.join(config['vits']['src_dir'], 'results')
         watcher = FileChangeWatcher(vits_output_dir)
-        for spk_name, mix_cfg_list in vocal_proc_entry['spk_list'].items():
+        for spk_name, mix_cfg_list in _get_spk_list(vocal_proc_entry['spk_list']).items():
             for mix_cfg in mix_cfg_list:
                 if sp:
                     channel_list = mix_cfg["channel"]
@@ -301,7 +315,7 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str, metadata: Optio
     spk_channel_dict = {'L': {}, 'R': {}}
     for vocal_proc_entry in config['down_mix']['vocal']:
         input_id = vocal_proc_entry['id']
-        for spk_name, mix_cfg_list in vocal_proc_entry['spk_list'].items():
+        for spk_name, mix_cfg_list in _get_spk_list(vocal_proc_entry['spk_list']).items():
             for mix_cfg in mix_cfg_list:
                 key_name = f'{input_id}_{spk_name}'
                 if sp:
@@ -321,7 +335,7 @@ def down_mix(config: dict, file_reg: FileRegistration, ext: str, metadata: Optio
                     spk_channel_dict['R'][key_name] = obj
     # ffmpeg note: stream labels in filter graph can be used only once
     # ffmpeg -y -i <input1> ... -i <inst_file> -filter_complex <filter_cmd> -map [ao] -ac 2 <extra_args> <output>
-    ffmpeg_args = ['ffmpeg', '-y']
+    ffmpeg_args = [config['ffmpeg']['ffmpeg_path'], '-v', 'quiet', '-y']
     filter_cmd = []
     channel_join_nodes = []
     channel_cnt_layout_mapper = {1: 'mono', 2: 'stereo'}
@@ -428,7 +442,7 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
     pipeline_list = config['uvr']['pipeline'].copy()  # type: list
     uvr_config_cache = ConfigCache()
     while len(pipeline_list) > 0:
-        for pipeline in pipeline_list:
+        for idx, pipeline in enumerate(pipeline_list):
             if all((x in file_reg if isinstance(x, str) else all(y in file_reg for y in x.values()))
                     for x in pipeline['output_id']):
                 # outputs are already generated
@@ -467,35 +481,61 @@ def execute_uvr_pipeline(config: dict, file_reg: FileRegistration, ext: str):
                 if not execute_uvr_task(config, input_path, output_path, uvr_config, file_reg.work_dir):
                     raise RuntimeError(f'Failed to execute UVR task: [input_path={input_path}] [output_path={output_path}]')
             if should_pop_and_continue:
-                pipeline_list.pop(0)
+                pipeline_list.pop(idx)
                 break
 
 
-def _convert_type(obj: Union[dict, list], key: Union[int, str], value: str) -> None:
+def _convert_bool(value: str, _: type) -> bool:
+    return True if value.lower() in {'1', 't', 'true', 'yes', 'on'} else False
+
+
+def _convert_default(value: str, value_type: type):
+    return value_type(value)
+
+
+_type_converter = {
+    bool: _convert_bool
+}
+
+@overload
+def _convert_type(obj: Dict[str, Any], key: str, value: str) -> None: ...
+
+@overload
+def _convert_type(obj: List[Any], key: int, value: str) -> None: ...
+
+def _convert_type(obj, key, value) -> None:
     if obj[key] is None:
         obj[key] = value
         return
     value_type = type(obj[key])
     if value_type != type(value):
-        obj[key] = value_type(value)
+        convert_fn = _type_converter.get(value_type, _convert_default)
+        obj[key] = convert_fn(value, value_type)
     else:
         obj[key] = value
 
 
 def parse_dot_args_to_dict(d: Union[list, dict], key: str, value: str) -> bool:
     key_split = key.split('.')
-    for sect in key_split[:-1]:
+    for i, sect in enumerate(key_split[:-1]):
         if len(sect) == 0:
             continue
         if isinstance(d, dict):
             if sect not in d:
                 d[sect] = {}
             d = d[sect]
-        elif isinstance(d, list) and key.isdecimal():
-            int_key = int(key)
-            if int_key >= 0 and int_key >= len(d):
-                d.extend([None] * (int_key - len(d) + 1))
-            d = d[int_key]
+        elif isinstance(d, list) and sect.isdecimal():
+            int_sect = int(sect)
+            if int_sect >= 0 and int_sect >= len(d):
+                d.extend([None] * (int_sect - len(d) + 1))
+            if d[int_sect] is None:
+                # pre-create node according to the next sect type
+                next_sect = key_split[i + 1]
+                if next_sect.isdecimal():
+                    d[int_sect] = []
+                else:
+                    d[int_sect] = {}
+            d = d[int_sect]
         else:
             return False
     last_sect = key_split[-1]
@@ -522,7 +562,7 @@ def get_metadata(config: dict, path: str) -> Dict[str, Any]:
 
 def extract_cover(config: dict, audio_file: str, output_cover_file: str, audio_metadata: Optional[dict] = None) -> bool:
     if audio_metadata is None:
-        audio_metadata = get_metadata(audio_file)
+        audio_metadata = get_metadata(config, audio_file)
     streams = audio_metadata['streams']
     video_streams = [stream for stream in streams if stream['codec_type'] == 'video']
     if len(video_streams) == 0:
@@ -530,7 +570,7 @@ def extract_cover(config: dict, audio_file: str, output_cover_file: str, audio_m
     if len(video_streams) > 1:
         print('Multiple cover found in audio file, use the first one')
     ffmpeg = config['ffmpeg']['ffmpeg_path']
-    ffmpeg_args = [ffmpeg, '-i', audio_file, '-an', '-vcodec', 'copy', output_cover_file]
+    ffmpeg_args = [ffmpeg, '-v', 'quiet', '-i', audio_file, '-an', '-vcodec', 'copy', output_cover_file]
     print(f'Running ffmpeg with args: {ffmpeg_args}')
     proc = subprocess.Popen(ffmpeg_args)
     if proc.wait() != 0:

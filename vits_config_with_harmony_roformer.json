@@ -1,0 +1,130 @@
+{
+  "file": {
+    "input": "G:/CloudMusic/Noa - 奇跡の彼方.flac",
+    "output": "Z:/"
+  },
+  "sys": {
+    "work_dir": "Z:/vits_pipeline_workdir",
+    "intermediate_file_ext": ".wav",
+    "mp3_output_bitrate": 320
+  },
+  "vits": {
+    "src_dir": "D:/BUILD_WORKSPACE/so-vits-svc_2.3.18",
+    "profile": {
+      "default": {
+        "model_path": "logs/44k/G_360000_ref_loss_32.273.pth",
+        "config_path": "logs/44k/config.json",
+        "clip": 0,
+        "trans": [0],
+        "auto_predict_f0": false,
+        "cluster_model_path": "logs/44k/feature_and_index.pkl",
+        "cluster_infer_ratio": 0.5,
+        "linear_gradient": 0,
+        "f0_predictor": "rmvpe",
+        "enhance": false,
+        "shallow_diffusion": true,
+        "use_spk_mix": false,
+        "loudness_envelope_adjustment": 1.0,
+        "feature_retrieval": true,
+        "diffusion_model_path": "logs/44k/diffusion/model_90000.pt",
+        "diffusion_config_path": "logs/44k/diffusion/config.yaml",
+        "k_step": 50,
+        "second_encoding": false,
+        "only_diffusion": false,
+        "slice_db": -35,
+        "device": null,
+        "noice_scale": 0.4,
+        "pad_seconds": 0.5,
+        "linear_gradient_retain": 0.75,
+        "enhancer_adaptive_key": 0,
+        "f0_filter_threshold": 0.1
+      }
+    }
+  },
+  "down_mix": {
+    "separate_process": true,
+    "vocal": [
+      {
+        "id": "vocal",
+        "spk_list": [
+          {
+            "spk_name": "坂本真綾",
+            "channel": ["L", "R"],
+            "weight": 1,
+            "delay": 0
+          }
+        ]
+      },
+      {
+        "id": "harmony",
+        "spk_list": [
+          {
+            "spk_name": "坂本真綾",
+            "channel": ["L", "R"],
+            "weight": 1,
+            "delay": 0
+          }
+        ]
+      }
+    ],
+    "inst": [
+      {
+        "id": "inst_direct",
+        "weight": 1
+      }
+    ]
+  },
+  "ffmpeg": {
+    "ffmpeg_path": null,
+    "ffprobe_path": null
+  },
+  "uvr": {
+    "enable": true,
+    "api_url": "http://localhost:8090/",
+    "pipeline": [
+      {
+        "input_id": ["input"],
+        "output_id": ["inst_direct"],
+        "config_source": "data",
+        "config_data": {
+          "process_method": "MDX-Net",
+          "model_name": "MB-Roformer-InstVoc-Duality-v2",
+          "gpu_conversion": true,
+          "vocal_only": false,
+          "inst_only": true,
+          "sample_mode": false,
+          "secondary_model_option": {
+            "activate": false
+          }
+        }
+      },
+      {
+        "input_id": ["input"],
+        "output_id": [
+          {
+            "Vocals": "vocal",
+            "Instrumental": "inst_with_harmony"
+          }
+        ],
+        "config_source": "file",
+        "config_file": "uvr_config/uvr_config_roformer_karaoke.json"
+      },
+      {
+        "input_id": ["inst_with_harmony"],
+        "output_id": ["harmony"],
+        "config_source": "data",
+        "config_data": {
+          "process_method": "MDX-Net",
+          "model_name": "MB-Roformer-InstVoc-Duality-v2",
+          "gpu_conversion": true,
+          "vocal_only": true,
+          "inst_only": false,
+          "sample_mode": false,
+          "secondary_model_option": {
+            "activate": false
+          }
+        }
+      }
+    ]
+  }
+}
